@@ -4,6 +4,7 @@ from dash.dependencies import Input, Output
 import plotly.graph_objs as go
 import numpy as np
 import dash_bootstrap_components as dbc
+from scipy.optimize import curve_fit
 
 # ============================
 # DADOS
@@ -33,30 +34,55 @@ coluna_2025 = [
     19.6, 20.3, 22.1, 23.9, 24.9, 24, 22.5, 22.7, 23.3, 21.5, 20.1, 19.5
 ]
 
-# ============================
-# REGRESSÕES
-# ============================
 x = np.arange(len(coluna_2024))
 
-# Linear
-coef_lin_2024 = np.polyfit(x, coluna_2024, 1)
-coef_lin_2025 = np.polyfit(x, coluna_2025, 1)
-y_lin_2024 = np.polyval(coef_lin_2024, x)
-y_lin_2025 = np.polyval(coef_lin_2025, x)
+# ============================
+# FUNÇÕES DE REGRESSÃO NÃO LINEAR
+# ============================
 
-# Não linear (polinomial de grau 3)
-coef_poly_2024 = np.polyfit(x, coluna_2024, 3)
-coef_poly_2025 = np.polyfit(x, coluna_2025, 3)
-y_poly_2024 = np.polyval(coef_poly_2024, x)
-y_poly_2025 = np.polyval(coef_poly_2025, x)
+def parabola(x, a, b, c):
+    return a*x**2 + b*x + c
+
+def exponencial(x, a, b, c):
+    return a * np.exp(b*x) + c
+
+def logistica(x, L, k, x0):
+    return L / (1 + np.exp(-k*(x - x0)))
+
+def potencia(x, a, b):
+    return a * np.power(x, b)
+
+# ============================
+# AJUSTES DE REGRESSÃO
+# ============================
+
+def ajustar_modelo(modelo, x, y, p0=None):
+    try:
+        popt, _ = curve_fit(modelo, x, y, p0=p0, maxfev=5000)
+        return modelo(x, *popt)
+    except:
+        return np.full_like(y, np.nan)
+
+y_linear_2024 = np.polyval(np.polyfit(x, coluna_2024, 1), x)
+y_linear_2025 = np.polyval(np.polyfit(x, coluna_2025, 1), x)
+y_parab_2024 = ajustar_modelo(parabola, x, coluna_2024)
+y_parab_2025 = ajustar_modelo(parabola, x, coluna_2025)
+y_exp_2024 = ajustar_modelo(exponencial, x, coluna_2024, p0=(1, 0.001, 15))
+y_exp_2025 = ajustar_modelo(exponencial, x, coluna_2025, p0=(1, 0.001, 15))
+y_log_2024 = ajustar_modelo(logistica, x, coluna_2024, p0=(30, 0.05, 80))
+y_log_2025 = ajustar_modelo(logistica, x, coluna_2025, p0=(30, 0.05, 80))
+x_nonzero = np.where(x==0, 1e-6, x)
+y_pot_2024 = ajustar_modelo(potencia, x_nonzero, coluna_2024, p0=(1, 0.01))
+y_pot_2025 = ajustar_modelo(potencia, x_nonzero, coluna_2025, p0=(1, 0.01))
 
 # ============================
 # IMAGENS DAS TEORIAS
 # ============================
+
 imagens_teorias = {
     "Teorema Central do Limite": "assets/teorema.jpg",
     "Correlação": "assets/correlacao.jpg",
-    "Amostragem, Distribuição Normal (Curva de Gauss ou Poisson)": "assets/amostragem_normal.png",
+    "Amostragem, Distribuição Normal (Curva de Gauss ou Poisson)": "assets/amostragem.jpg",
     "T-Student": "assets/t_student.png",
     "Qui-quadrado": "assets/qui_quadrado.png"
 }
@@ -64,19 +90,12 @@ imagens_teorias = {
 # ============================
 # DASH APP
 # ============================
+
 app = dash.Dash(__name__, external_stylesheets=[dbc.themes.CYBORG])
 app.title = "Clima em Curitiba"
 
 app.layout = dbc.Container([
-    dbc.Row([
-        dbc.Col(
-            html.H1(
-                "Clima em Curitiba",
-                className="text-center mb-4 mt-2",
-                style={"color": "white"}
-            )
-        )
-    ]),
+    dbc.Row([dbc.Col(html.H1("Clima em Curitiba", className="text-center mb-4 mt-2", style={"color": "white"}))]),
 
     dbc.Row([
         dbc.Col([
@@ -84,23 +103,21 @@ app.layout = dbc.Container([
             dcc.Dropdown(
                 id='tipo-regressao',
                 options=[
-                    {'label': 'Regressão Linear', 'value': 'linear'},
-                    {'label': 'Regressão Não Linear (Polinomial)', 'value': 'nao_linear'}
+                    {'label': 'Linear', 'value': 'linear'},
+                    {'label': 'Parabólica', 'value': 'parab'},
+                    {'label': 'Exponencial', 'value': 'exp'},
+                    {'label': 'Logística', 'value': 'log'},
+                    {'label': 'Potência', 'value': 'pot'}
                 ],
                 value='linear',
                 clearable=False,
                 className="mb-4",
                 style={'color': '#000'}
             ),
-            dcc.Graph(id='grafico-regressao', style={'height': '75vh'})
-        ])
-    ]),
+            dcc.Graph(id='grafico-regressao', style={'height': '60vh'}),
 
-    html.Hr(style={"borderColor": "#444"}),
+            html.Hr(style={"borderColor": "#444"}),
 
-    # Dropdown de teorias
-    dbc.Row([
-        dbc.Col([
             html.Label("Selecione uma teoria estatística:", style={"color": "white", "fontSize": "18px"}),
             dcc.Dropdown(
                 id='dropdown-teorias',
@@ -110,8 +127,8 @@ app.layout = dbc.Container([
                 className="mb-4"
             ),
             html.Div(id="imagem-teoria", className="text-center")
-        ], width=8)
-    ], justify="center")
+        ])
+    ])
 ], fluid=True, style={"backgroundColor": "#121212", "paddingBottom": "50px"})
 
 # ============================
@@ -124,20 +141,24 @@ app.layout = dbc.Container([
 )
 def atualizar_grafico(tipo):
     if tipo == 'linear':
-        y1, y2 = y_lin_2024, y_lin_2025
-        titulo = 'Regressão Linear das Temperaturas'
-    else:
-        y1, y2 = y_poly_2024, y_poly_2025
-        titulo = 'Regressão Não Linear (Polinomial) das Temperaturas'
+        y1, y2, titulo = y_linear_2024, y_linear_2025, "Regressão Linear"
+    elif tipo == 'parab':
+        y1, y2, titulo = y_parab_2024, y_parab_2025, "Regressão Parabólica"
+    elif tipo == 'exp':
+        y1, y2, titulo = y_exp_2024, y_exp_2025, "Regressão Exponencial"
+    elif tipo == 'log':
+        y1, y2, titulo = y_log_2024, y_log_2025, "Regressão Logística"
+    elif tipo == 'pot':
+        y1, y2, titulo = y_pot_2024, y_pot_2025, "Regressão de Potência"
 
     fig = go.Figure()
-    fig.add_trace(go.Scatter(y=coluna_2024, mode='lines', name='Temperaturas 2024', line=dict(color='skyblue')))
-    fig.add_trace(go.Scatter(y=coluna_2025, mode='lines', name='Temperaturas 2025', line=dict(color='lightcoral')))
-    fig.add_trace(go.Scatter(y=y1, mode='lines', name='Regressão 2024', line=dict(dash='dash', color='deepskyblue')))
-    fig.add_trace(go.Scatter(y=y2, mode='lines', name='Regressão 2025', line=dict(dash='dash', color='tomato')))
+    fig.add_trace(go.Scatter(y=coluna_2024, mode='lines', name='2024', line=dict(color='skyblue')))
+    fig.add_trace(go.Scatter(y=coluna_2025, mode='lines', name='2025', line=dict(color='lightcoral')))
+    fig.add_trace(go.Scatter(y=y1, mode='lines', name='Ajuste 2024', line=dict(dash='dash', color='deepskyblue')))
+    fig.add_trace(go.Scatter(y=y2, mode='lines', name='Ajuste 2025', line=dict(dash='dash', color='tomato')))
 
     fig.update_layout(
-        title=titulo,
+        title=titulo + " das Temperaturas",
         xaxis_title='Horas (0-167)',
         yaxis_title='Temperatura (°C)',
         legend_title='Ano',
@@ -146,7 +167,6 @@ def atualizar_grafico(tipo):
         plot_bgcolor='#111'
     )
     return fig
-
 
 @app.callback(
     Output("imagem-teoria", "children"),
@@ -166,5 +186,6 @@ def mostrar_imagem(teoria):
 # ============================
 # EXECUÇÃO
 # ============================
+
 if __name__ == '__main__':
     app.run(debug=True)
