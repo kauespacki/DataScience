@@ -37,7 +37,7 @@ coluna_2025 = [
 x = np.arange(len(coluna_2024))
 
 # ============================
-# FUNÇÕES DE REGRESSÃO NÃO LINEAR
+# FUNÇÕES DE REGRESSÃO
 # ============================
 
 def parabola(x, a, b, c):
@@ -53,7 +53,7 @@ def potencia(x, a, b):
     return a * np.power(x, b)
 
 # ============================
-# AJUSTES DE REGRESSÃO
+# AJUSTES
 # ============================
 
 def ajustar_modelo(modelo, x, y, p0=None):
@@ -76,7 +76,7 @@ y_pot_2024 = ajustar_modelo(potencia, x_nonzero, coluna_2024, p0=(1, 0.01))
 y_pot_2025 = ajustar_modelo(potencia, x_nonzero, coluna_2025, p0=(1, 0.01))
 
 # ============================
-# IMAGENS DAS TEORIAS
+# IMAGENS DAS TEORIAS (mantidas)
 # ============================
 
 imagens_teorias = {
@@ -132,6 +132,20 @@ app.layout = dbc.Container([
 ], fluid=True, style={"backgroundColor": "#121212", "paddingBottom": "50px"})
 
 # ============================
+# MÉTRICAS (R² e RMSE)
+# ============================
+
+def calcular_metricas(y_real, y_pred):
+    mask = ~np.isnan(y_pred)
+    if mask.sum() == 0:
+        return np.nan, np.nan
+    ss_res = np.sum((y_real[mask] - y_pred[mask]) ** 2)
+    ss_tot = np.sum((y_real[mask] - np.mean(y_real[mask])) ** 2)
+    r2 = 1 - (ss_res / ss_tot)
+    rmse = np.sqrt(ss_res / len(y_real[mask]))
+    return r2, rmse
+
+# ============================
 # CALLBACKS
 # ============================
 
@@ -151,6 +165,9 @@ def atualizar_grafico(tipo):
     elif tipo == 'pot':
         y1, y2, titulo = y_pot_2024, y_pot_2025, "Regressão de Potência"
 
+    r2_2024, rmse_2024 = calcular_metricas(np.array(coluna_2024), np.array(y1))
+    r2_2025, rmse_2025 = calcular_metricas(np.array(coluna_2025), np.array(y2))
+
     fig = go.Figure()
     fig.add_trace(go.Scatter(y=coluna_2024, mode='lines', name='2024', line=dict(color='skyblue')))
     fig.add_trace(go.Scatter(y=coluna_2025, mode='lines', name='2025', line=dict(color='lightcoral')))
@@ -158,7 +175,13 @@ def atualizar_grafico(tipo):
     fig.add_trace(go.Scatter(y=y2, mode='lines', name='Ajuste 2025', line=dict(dash='dash', color='tomato')))
 
     fig.update_layout(
-        title=titulo + " das Temperaturas",
+        title=(
+            f"{titulo} das Temperaturas<br>"
+            f"<sup style='color:#ccc'>"
+            f"R² (2024): {r2_2024:.4f} | RMSE (2024): {rmse_2024:.4f} &nbsp;&nbsp;&nbsp; "
+            f"R² (2025): {r2_2025:.4f} | RMSE (2025): {rmse_2025:.4f}"
+            f"</sup>"
+        ),
         xaxis_title='Horas (0-167)',
         yaxis_title='Temperatura (°C)',
         legend_title='Ano',
@@ -189,4 +212,3 @@ def mostrar_imagem(teoria):
 
 if __name__ == '__main__':
     app.run(debug=True)
-
