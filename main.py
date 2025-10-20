@@ -83,8 +83,8 @@ imagens_teorias = {
     "Teorema Central do Limite": "assets/teorema.jpg",
     "Correlação": "assets/correlacao.jpg",
     "Amostragem, Distribuição Normal (Curva de Gauss ou Poisson)": "assets/amostragem.jpg",
-    "T-Student": "assets/t_student.png",
-    "Qui-quadrado": "assets/qui_quadrado.png"
+    "T-Student": "assets/t-student.png",
+    "Qui-quadrado": "assets/qui-quadrado.png"
 }
 
 # ============================
@@ -189,3 +189,4 @@ def mostrar_imagem(teoria):
 
 if __name__ == '__main__':
     app.run(debug=True)
+
