@@ -50,89 +50,36 @@ def logistica(x, L, k, x0):
     return L / (1 + np.exp(-k*(x - x0)))
 
 def potencia(x, a, b):
+    # Evita problema com 0^b (quando b<0)
+    x = np.where(x==0, 1e-6, x)
     return a * np.power(x, b)
-
-# ============================
-# AJUSTES
-# ============================
 
 def ajustar_modelo(modelo, x, y, p0=None):
     try:
         popt, _ = curve_fit(modelo, x, y, p0=p0, maxfev=5000)
         return modelo(x, *popt)
-    except:
+    except (RuntimeError, TypeError):
+        # Caso o ajuste falhe, retorna NaNs
         return np.full_like(y, np.nan)
 
+# Ajustes com parâmetros iniciais melhores
 y_linear_2024 = np.polyval(np.polyfit(x, coluna_2024, 1), x)
 y_linear_2025 = np.polyval(np.polyfit(x, coluna_2025, 1), x)
+
 y_parab_2024 = ajustar_modelo(parabola, x, coluna_2024)
 y_parab_2025 = ajustar_modelo(parabola, x, coluna_2025)
-y_exp_2024 = ajustar_modelo(exponencial, x, coluna_2024, p0=(1, 0.001, 15))
-y_exp_2025 = ajustar_modelo(exponencial, x, coluna_2025, p0=(1, 0.001, 15))
-y_log_2024 = ajustar_modelo(logistica, x, coluna_2024, p0=(30, 0.05, 80))
-y_log_2025 = ajustar_modelo(logistica, x, coluna_2025, p0=(30, 0.05, 80))
-x_nonzero = np.where(x==0, 1e-6, x)
-y_pot_2024 = ajustar_modelo(potencia, x_nonzero, coluna_2024, p0=(1, 0.01))
-y_pot_2025 = ajustar_modelo(potencia, x_nonzero, coluna_2025, p0=(1, 0.01))
+
+y_exp_2024 = ajustar_modelo(exponencial, x, coluna_2024, p0=(1, 0.001, np.mean(coluna_2024)))
+y_exp_2025 = ajustar_modelo(exponencial, x, coluna_2025, p0=(1, 0.001, np.mean(coluna_2025)))
+
+y_log_2024 = ajustar_modelo(logistica, x, coluna_2024, p0=(max(coluna_2024), 0.05, len(x)/2))
+y_log_2025 = ajustar_modelo(logistica, x, coluna_2025, p0=(max(coluna_2025), 0.05, len(x)/2))
+
+y_pot_2024 = ajustar_modelo(potencia, x, coluna_2024, p0=(1, 0.01))
+y_pot_2025 = ajustar_modelo(potencia, x, coluna_2025, p0=(1, 0.01))
 
 # ============================
-# IMAGENS DAS TEORIAS (mantidas)
-# ============================
-
-imagens_teorias = {
-    "Teorema Central do Limite": "assets/teorema.jpg",
-    "Correlação": "assets/correlacao.jpg",
-    "Amostragem, Distribuição Normal (Curva de Gauss ou Poisson)": "assets/amostragem.jpg",
-    "T-Student": "assets/t-student.png",
-    "Qui-quadrado": "assets/qui-quadrado.png"
-}
-
-# ============================
-# DASH APP
-# ============================
-
-app = dash.Dash(__name__, external_stylesheets=[dbc.themes.CYBORG])
-app.title = "Clima em Curitiba"
-
-app.layout = dbc.Container([
-    dbc.Row([dbc.Col(html.H1("Clima em Curitiba", className="text-center mb-4 mt-2", style={"color": "white"}))]),
-
-    dbc.Row([
-        dbc.Col([
-            html.Label("Tipo de Regressão", style={"color": "white"}),
-            dcc.Dropdown(
-                id='tipo-regressao',
-                options=[
-                    {'label': 'Linear', 'value': 'linear'},
-                    {'label': 'Parabólica', 'value': 'parab'},
-                    {'label': 'Exponencial', 'value': 'exp'},
-                    {'label': 'Logística', 'value': 'log'},
-                    {'label': 'Potência', 'value': 'pot'}
-                ],
-                value='linear',
-                clearable=False,
-                className="mb-4",
-                style={'color': '#000'}
-            ),
-            dcc.Graph(id='grafico-regressao', style={'height': '60vh'}),
-
-            html.Hr(style={"borderColor": "#444"}),
-
-            html.Label("Selecione uma teoria estatística:", style={"color": "white", "fontSize": "18px"}),
-            dcc.Dropdown(
-                id='dropdown-teorias',
-                options=[{'label': k, 'value': k} for k in imagens_teorias.keys()],
-                placeholder="Escolha uma teoria...",
-                style={'color': '#000'},
-                className="mb-4"
-            ),
-            html.Div(id="imagem-teoria", className="text-center")
-        ])
-    ])
-], fluid=True, style={"backgroundColor": "#121212", "paddingBottom": "50px"})
-
-# ============================
-# MÉTRICAS (R² e RMSE)
+# MÉTRICAS
 # ============================
 
 def calcular_metricas(y_real, y_pred):
@@ -146,6 +93,60 @@ def calcular_metricas(y_real, y_pred):
     return r2, rmse
 
 # ============================
+# DASH
+# ============================
+
+app = dash.Dash(__name__, external_stylesheets=[dbc.themes.SLATE])
+app.title = "Análise de Temperaturas - Data Science View"
+
+# Imagens das teorias (verificar se estão em assets/)
+imagens_teorias = {
+    "Teorema Central do Limite": "assets/teorema.jpg",
+    "Correlação": "assets/correlacao.jpg",
+    "Amostragem, Distribuição Normal (Curva de Gauss ou Poisson)": "assets/amostragem.jpg",
+    "T-Student": "assets/t-student.png",
+    "Qui-quadrado": "assets/qui-quadrado.png"
+}
+
+# ============================
+# LAYOUT
+# ============================
+
+app.layout = dbc.Container([
+    dbc.Row([dbc.Col(html.H2("📈 Análise de Temperaturas - Curitiba",
+                             className="text-center text-light mt-3 mb-4"))]),
+
+    dbc.Row([
+        dbc.Col([
+            dcc.Dropdown(
+                id='tipo-regressao',
+                options=[
+                    {'label': 'Linear', 'value': 'linear'},
+                    {'label': 'Parabólica', 'value': 'parab'},
+                    {'label': 'Exponencial', 'value': 'exp'},
+                    {'label': 'Logística', 'value': 'log'},
+                    {'label': 'Potência', 'value': 'pot'}
+                ],
+                value='linear',
+                className="mb-4",
+                style={'color': '#000'}
+            ),
+            dcc.Graph(id='grafico-regressao', style={'height': '70vh'}),
+            html.Hr(style={"borderColor": "#444", "marginTop": "30px"}),
+            html.Label("Selecione uma teoria estatística:", style={"color": "white", "fontSize": "18px"}),
+            dcc.Dropdown(
+                id='dropdown-teorias',
+                options=[{'label': k, 'value': k} for k in imagens_teorias.keys()],
+                placeholder="Escolha uma teoria...",
+                style={'color': '#000'},
+                className="mb-4"
+            ),
+            html.Div(id="imagem-teoria", className="text-center")
+        ])
+    ])
+], fluid=True, style={"backgroundColor": "#1E1E1E", "paddingBottom": "40px"})
+
+# ============================
 # CALLBACKS
 # ============================
 
@@ -154,42 +155,53 @@ def calcular_metricas(y_real, y_pred):
     Input('tipo-regressao', 'value')
 )
 def atualizar_grafico(tipo):
-    if tipo == 'linear':
-        y1, y2, titulo = y_linear_2024, y_linear_2025, "Regressão Linear"
-    elif tipo == 'parab':
-        y1, y2, titulo = y_parab_2024, y_parab_2025, "Regressão Parabólica"
-    elif tipo == 'exp':
-        y1, y2, titulo = y_exp_2024, y_exp_2025, "Regressão Exponencial"
-    elif tipo == 'log':
-        y1, y2, titulo = y_log_2024, y_log_2025, "Regressão Logística"
-    elif tipo == 'pot':
-        y1, y2, titulo = y_pot_2024, y_pot_2025, "Regressão de Potência"
+    modelos = {
+        'linear': (y_linear_2024, y_linear_2025, "Linear"),
+        'parab': (y_parab_2024, y_parab_2025, "Parabólica"),
+        'exp': (y_exp_2024, y_exp_2025, "Exponencial"),
+        'log': (y_log_2024, y_log_2025, "Logística"),
+        'pot': (y_pot_2024, y_pot_2025, "Potência")
+    }
+    y1, y2, titulo = modelos[tipo]
 
-    r2_2024, rmse_2024 = calcular_metricas(np.array(coluna_2024), np.array(y1))
-    r2_2025, rmse_2025 = calcular_metricas(np.array(coluna_2025), np.array(y2))
+    r2_2024, rmse_2024 = calcular_metricas(np.array(coluna_2024), y1)
+    r2_2025, rmse_2025 = calcular_metricas(np.array(coluna_2025), y2)
 
     fig = go.Figure()
-    fig.add_trace(go.Scatter(y=coluna_2024, mode='lines', name='2024', line=dict(color='skyblue')))
-    fig.add_trace(go.Scatter(y=coluna_2025, mode='lines', name='2025', line=dict(color='lightcoral')))
-    fig.add_trace(go.Scatter(y=y1, mode='lines', name='Ajuste 2024', line=dict(dash='dash', color='deepskyblue')))
-    fig.add_trace(go.Scatter(y=y2, mode='lines', name='Ajuste 2025', line=dict(dash='dash', color='tomato')))
+
+    # Scatter com hover
+    fig.add_trace(go.Scatter(x=x, y=coluna_2024, mode='markers', name='2024',
+                             marker=dict(color='#00BFFF', size=6, opacity=0.8),
+                             hovertemplate='Hora: %{x}<br>Temp: %{y:.2f}°C'))
+    fig.add_trace(go.Scatter(x=x, y=coluna_2025, mode='markers', name='2025',
+                             marker=dict(color='#FF6347', size=6, opacity=0.8),
+                             hovertemplate='Hora: %{x}<br>Temp: %{y:.2f}°C'))
+
+    # Linhas de ajuste com hover
+    fig.add_trace(go.Scatter(x=x, y=y1, mode='lines', name='Ajuste 2024',
+                             line=dict(color='#00BFFF', width=2.5),
+                             hovertemplate='Hora: %{x}<br>Ajuste: %{y:.2f}°C'))
+    fig.add_trace(go.Scatter(x=x, y=y2, mode='lines', name='Ajuste 2025',
+                             line=dict(color='#FF6347', width=2.5),
+                             hovertemplate='Hora: %{x}<br>Ajuste: %{y:.2f}°C'))
 
     fig.update_layout(
-        title=(
-            f"{titulo} das Temperaturas<br>"
-            f"<sup style='color:#ccc'>"
-            f"R² (2024): {r2_2024:.4f} | RMSE (2024): {rmse_2024:.4f} &nbsp;&nbsp;&nbsp; "
-            f"R² (2025): {r2_2025:.4f} | RMSE (2025): {rmse_2025:.4f}"
-            f"</sup>"
+        title=dict(
+            text=f"Regressão {titulo}<br><sup style='color:#AAA'>"
+                 f"R² (2024): {r2_2024:.4f} | RMSE (2024): {rmse_2024:.3f} &nbsp; "
+                 f"R² (2025): {r2_2025:.4f} | RMSE (2025): {rmse_2025:.3f}</sup>",
+            x=0.5, font=dict(size=22, color='white')
         ),
-        xaxis_title='Horas (0-167)',
-        yaxis_title='Temperatura (°C)',
-        legend_title='Ano',
-        template='plotly_dark',
-        paper_bgcolor='#111',
-        plot_bgcolor='#111'
+        xaxis=dict(title='Horas', gridcolor='#333', showspikes=True),
+        yaxis=dict(title='Temperatura (°C)', gridcolor='#333', showspikes=True),
+        hovermode='x unified',
+        paper_bgcolor='#1E1E1E',
+        plot_bgcolor='#1E1E1E',
+        font=dict(color='white'),
+        legend=dict(bgcolor='rgba(0,0,0,0.3)', bordercolor='#444', borderwidth=1)
     )
     return fig
+
 
 @app.callback(
     Output("imagem-teoria", "children"),
@@ -198,7 +210,9 @@ def atualizar_grafico(tipo):
 def mostrar_imagem(teoria):
     if teoria is None:
         return html.P("Selecione uma teoria para visualizar.", style={"color": "#bbb", "fontSize": "18px"})
-    caminho = imagens_teorias[teoria]
+    caminho = imagens_teorias.get(teoria)
+    if caminho is None:
+        return html.P("Imagem não encontrada.", style={"color": "#bbb", "fontSize": "18px"})
     return html.Img(src=caminho, style={
         "width": "70%",
         "borderRadius": "12px",
@@ -207,7 +221,7 @@ def mostrar_imagem(teoria):
     })
 
 # ============================
-# EXECUÇÃO
+# RUN
 # ============================
 
 if __name__ == '__main__':
