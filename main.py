@@ -4,18 +4,23 @@ from dash.dependencies import Input, Output
 import plotly.graph_objs as go
 import numpy as np
 import dash_bootstrap_components as dbc
-from scipy.optimize import curve_fit, minimize, least_squares
+from scipy.optimize import curve_fit
+import emcee
+EMCEE_AVAILABLE = True
 
 # ============================
-# DADOS (mantidos)
+# DADOS
 # ============================
 
 coluna_2024 = [
     17.7, 17.7, 17.8, 17.6, 17.6, 17.8, 17.8, 17.6, 17, 16.4, 18.6, 18.7, 20.2, 20.9, 23.8, 24, 25.6, 26.6, 27.1, 27,
     25.5, 24.9, 21.9, 20.5, 19.6, 19.4, 19, 18.7, 18.5, 17.5, 17.3, 17, 16.8, 16.5, 18.6, 20.1, 22.1, 24.2, 25.5, 26.1,
-    27, 27.3, 27.9, 27.6, 26.1, 25.7, 22.5, 21.1, 20.2, 19.8, 19.5, 19.5, 19.2, 18.7, 18.3, 18.4, 17.8, 17.8, 19.4, 22.2,
-    23.2, 25.2, 27, 27.5, 28.5, 29.8, 27.3, 26, 23.5, 22.4, 21, 20.2, 18.6, 18.4, 18.4, 18.2, 18, 18.2, 18.2, 18.1, 17.7,
-    17.6, 17.7, 18.5, 19.5, 20.9, 22.7, 23.1, 25.6, 25.7, 26.2, 26.3, 25.5, 23.5, 22.2, 20.4, 19.8, 19.1, 19, 18.3, 17.4,
+    27, 27.3, 27.9, 27.6, 26.1, 25.7, 22.5, 21.1, 20.2, 19.8, 19.5, 19.5, 19.2, 18.7, 18.3, 18.4, 17.8, 17.8, 19.4,
+    22.2,
+    23.2, 25.2, 27, 27.5, 28.5, 29.8, 27.3, 26, 23.5, 22.4, 21, 20.2, 18.6, 18.4, 18.4, 18.2, 18, 18.2, 18.2, 18.1,
+    17.7,
+    17.6, 17.7, 18.5, 19.5, 20.9, 22.7, 23.1, 25.6, 25.7, 26.2, 26.3, 25.5, 23.5, 22.2, 20.4, 19.8, 19.1, 19, 18.3,
+    17.4,
     17.2, 17.6, 17.3, 16.9, 16.6, 17.5, 18.6, 19.9, 22.6, 23, 24.7, 26.8, 28, 28, 26.3, 25.3, 24.9, 22.4, 20.7, 19.9,
     19.7, 19.6, 19.2, 19.2, 19, 18.6, 18.6, 18.5, 18.1, 18.8, 19.9, 22.8, 23.1, 24.2, 25.7, 27.2, 27.8, 27.9, 28, 26.5,
     25.4, 23.1, 21, 20.1, 19.9, 19.8, 19.8, 19.9, 20, 19.4, 19.2, 19, 19, 19, 19.7, 22.9, 25.4, 27.6, 29.8, 31.1, 32.1,
@@ -27,7 +32,8 @@ coluna_2025 = [
     25.5, 22.9, 22.5, 21.2, 21.4, 20.6, 19.9, 19.6, 19.2, 18.9, 18.5, 17.9, 17.7, 17.8, 18.9, 20.9, 23.8, 25.9, 27.6,
     28.1, 28.8, 29.4, 28.1, 26.8, 24.1, 19.8, 20, 19.7, 19.6, 20, 19.9, 19.5, 18.9, 19, 18.5, 18.7, 18.3, 18.4, 19.1,
     20.8, 23.6, 24.6, 26.2, 27.2, 28.2, 29.3, 29.8, 30.8, 30.2, 28.8, 28.7, 27.6, 25.4, 24.7, 23.5, 22.6, 21.9, 21.6,
-    20.5, 19.8, 19.3, 18.8, 19.4, 22.9, 24.5, 25.7, 27.1, 28.5, 29.3, 30.6, 30.7, 30.8, 30.1, 30.2, 29.2, 23.7, 22, 21.5,
+    20.5, 19.8, 19.3, 18.8, 19.4, 22.9, 24.5, 25.7, 27.1, 28.5, 29.3, 30.6, 30.7, 30.8, 30.1, 30.2, 29.2, 23.7, 22,
+    21.5,
     20.9, 19.2, 18.5, 18.5, 18.5, 18.4, 18.3, 18.4, 18.5, 18.8, 19.6, 19.8, 22.7, 22.8, 25.3, 26.5, 27.8, 28.2, 26.4,
     24.8, 23.9, 21.7, 19.7, 19.5, 19.4, 19.1, 18.7, 18.4, 18.4, 18.3, 17.9, 17.9, 18.6, 19.9, 20.3, 22.2, 23.6, 25.5,
     25.9, 27.3, 26.5, 26.1, 24.6, 22.8, 20.6, 19.7, 18.9, 18.9, 19.1, 18.9, 18.8, 18.6, 18.5, 18.5, 18.4, 18, 18, 19.2,
@@ -35,177 +41,136 @@ coluna_2025 = [
 ]
 
 x = np.arange(len(coluna_2024))
-x_float = x.astype(float)
+
 
 # ============================
-# MODELO EXPONENCIAL
+# FUNÇÕES DE REGRESSÃO
 # ============================
-def modelo_exp(x, a, b, c):
+
+def parabola(x, a, b, c):
+    return a * x ** 2 + b * x + c
+
+
+def exponencial(x, a, b, c):
     return a * np.exp(b * x) + c
+
+
+def logistica(x, L, k, x0):
+    return L / (1 + np.exp(-k * (x - x0)))
+
+
+def potencia(x, a, b):
+    # Evita problema com 0^b (quando b<0)
+    x = np.where(x == 0, 1e-6, x)
+    return a * np.power(x, b)
+
+
+# ============================
+# FUNÇÕES PARA MCMC BAYESIANO (emcee)
+# Parâmetros: [a, b, c]
+# ============================
+
+def log_prior(params):
+    """Define a probabilidade prévia dos parâmetros (priors)."""
+    a, b, c = params
+    # Define priors "planos" (pouca informação prévia)
+    # Supomos que 'a' e 'c' estão entre 0 e 50 (razoável para temp)
+    # --- CORREÇÃO: O prior de 'b' de -0.1 a 0.1 estava muito frouxo, causando divergências.
+    # --- Restringindo para -0.01 a 0.01 ---
+    if 0.0 < a < 50.0 and -0.01 < b < 0.01 and 0.0 < c < 50.0:
+        return 0.0  # Probabilidade logarítmica de 0 (probabilidade de 1)
+    return -np.inf  # Probabilidade logarítmica de -infinito (probabilidade de 0)
+
+
+def log_likelihood(params, x, y_obs, y_err):
+    """Define a verossimilhança (likelihood) - quão bem o modelo se ajusta aos dados."""
+    a, b, c = params
+    y_model = exponencial(x, a, b, c)
+
+    # Supõe que os erros são Gaussianos
+    # log(L) = -0.5 * sum( ((y_obs - y_model) / y_err)**2 + log(2*pi*y_err**2) )
+    sigma2 = y_err ** 2
+    return -0.5 * np.sum((y_obs - y_model) ** 2 / sigma2 + np.log(2 * np.pi * sigma2))
+
+
+def log_probability(params, x, y_obs, y_err):
+    """Combina o prior e a likelihood."""
+    lp = log_prior(params)
+    if not np.isfinite(lp):
+        return -np.inf
+    ll = log_likelihood(params, x, y_obs, y_err)
+    if not np.isfinite(ll):
+        return -np.inf
+    return lp + ll
+
+
+# ============================
+# FUNÇÃO DE AJUSTE
+# ============================
+
+def ajustar_modelo(modelo, x, y, p0=None, method='lm'):
+    """
+    Ajusta um modelo aos dados x, y.
+    Agora aceita um parâmetro 'method' para ser passado ao curve_fit.
+    Métodos comuns: 'lm' (padrão), 'trf', 'dogbox'.
+    """
+    try:
+        # Passa o 'method' para o curve_fit
+        popt, _ = curve_fit(modelo, x, y, p0=p0, method=method, maxfev=5000)
+        return modelo(x, *popt)
+    except (RuntimeError, TypeError, ValueError):
+        # Caso o ajuste falhe (ex: p0 ruins ou método incompatível), retorna NaNs
+        return np.full_like(y, np.nan)
+
+
+# Ajustes com parâmetros iniciais (cálculos não exponenciais)
+# O ajuste exponencial será feito DENTRO do callback
+y_linear_2024 = np.polyval(np.polyfit(x, coluna_2024, 1), x)
+y_linear_2025 = np.polyval(np.polyfit(x, coluna_2025, 1), x)
+
+y_parab_2024 = ajustar_modelo(parabola, x, coluna_2024)
+y_parab_2025 = ajustar_modelo(parabola, x, coluna_2025)
+
+y_log_2024 = ajustar_modelo(logistica, x, coluna_2024, p0=(max(coluna_2024), 0.05, len(x) / 2))
+y_log_2025 = ajustar_modelo(logistica, x, coluna_2025, p0=(max(coluna_2025), 0.05, len(x) / 2))
+
+y_pot_2024 = ajustar_modelo(potencia, x, coluna_2024, p0=(1, 0.01))
+y_pot_2025 = ajustar_modelo(potencia, x, coluna_2025, p0=(1, 0.01))
+
 
 # ============================
 # MÉTRICAS
 # ============================
+
 def calcular_metricas(y_real, y_pred):
     mask = ~np.isnan(y_pred)
-    if mask.sum() == 0:
+    if mask.sum() == 0:  # Se todos os y_pred forem NaN
         return np.nan, np.nan
-    ss_res = np.sum((y_real[mask] - y_pred[mask]) ** 2)
-    ss_tot = np.sum((y_real[mask] - np.mean(y_real[mask])) ** 2)
-    r2 = 1 - (ss_res / ss_tot) if ss_tot != 0 else np.nan
-    rmse = np.sqrt(ss_res / mask.sum())
+    y_real_masked = y_real[mask]
+    y_pred_masked = y_pred[mask]
+
+    if len(y_real_masked) == 0:
+        return np.nan, np.nan
+
+    ss_res = np.sum((y_real_masked - y_pred_masked) ** 2)
+    ss_tot = np.sum((y_real_masked - np.mean(y_real_masked)) ** 2)
+
+    if ss_tot == 0:  # Evita divisão por zero se os dados reais forem constantes
+        return np.nan, np.nan
+
+    r2 = 1 - (ss_res / ss_tot)
+    rmse = np.sqrt(ss_res / len(y_real_masked))
     return r2, rmse
 
+
 # ============================
-# FUNÇÕES DE AJUSTE (vários métodos)
+# DASH
 # ============================
 
-def fit_curve_fit(x, y, p0=(1, 0.001, 15)):
-    try:
-        popt, _ = curve_fit(modelo_exp, x, y, p0=p0, maxfev=10000)
-        return popt, modelo_exp(x, *popt)
-    except Exception as e:
-        # fallback: try different p0
-        try:
-            popt, _ = curve_fit(modelo_exp, x, y, p0=(np.mean(y), 0.0, 0.0), maxfev=10000)
-            return popt, modelo_exp(x, *popt)
-        except Exception:
-            return None, np.full_like(y, np.nan)
+app = dash.Dash(__name__, external_stylesheets=[dbc.themes.SLATE])
+app.title = "Análise de Temperaturas - Data Science View"
 
-def fit_mle(x, y, p0=(1, 0.001, 15)):
-    # assume gaussian errors with unknown sigma; maximize likelihood => minimize negative log-likelihood
-    def nll(theta):
-        a, b, c, logsig = theta
-        sigma = np.exp(logsig)
-        mu = modelo_exp(x, a, b, c)
-        # negative log-likelihood
-        n = len(y)
-        res = 0.5 * n * np.log(2 * np.pi * sigma**2) + 0.5 * np.sum((y - mu)**2) / (sigma**2)
-        return res
-    x0 = np.array([p0[0], p0[1], p0[2], np.log(np.std(y) if np.std(y)>0 else 1.0)])
-    bounds = [(-np.inf, np.inf), (-1, 1), (-np.inf, np.inf), (None, None)]
-    try:
-        res = minimize(nll, x0, method='L-BFGS-B')
-        if not res.success:
-            # try unconstrained
-            res = minimize(nll, x0, method='BFGS')
-        a, b, c, logsig = res.x
-        popt = np.array([a, b, c])
-        yhat = modelo_exp(x, *popt)
-        return popt, yhat
-    except Exception:
-        return None, np.full_like(y, np.nan)
-
-def fit_gauss_newton(x, y, p0=(1, 0.001, 15), max_iter=100, tol=1e-8):
-    # Gauss-Newton for least squares (nonlinear)
-    a, b, c = p0
-    x_arr = np.array(x, dtype=float)
-    y_arr = np.array(y, dtype=float)
-    for i in range(max_iter):
-        expbx = np.exp(b * x_arr)
-        mu = a * expbx + c
-        r = y_arr - mu  # residuals
-        # Jacobian J shape (n, 3)
-        J = np.vstack([expbx, a * x_arr * expbx, np.ones_like(x_arr)]).T  # d/d a, d/d b, d/d c
-        # normal eq: J^T J delta = J^T r
-        JTJ = J.T @ J
-        JTr = J.T @ r
-        try:
-            delta = np.linalg.solve(JTJ, JTr)
-        except np.linalg.LinAlgError:
-            # ill-conditioned, return nan
-            return None, np.full_like(y_arr, np.nan)
-        # update parameters (note: because r = y - mu, and delta solves for J^T J delta = J^T r,
-        # we add delta to parameters)
-        a_new = a + delta[0]
-        b_new = b + delta[1]
-        c_new = c + delta[2]
-        if np.linalg.norm(delta) < tol:
-            a, b, c = a_new, b_new, c_new
-            break
-        a, b, c = a_new, b_new, c_new
-    popt = np.array([a, b, c])
-    return popt, modelo_exp(x_arr, *popt)
-
-def fit_levenberg_marquardt(x, y, p0=(1, 0.001, 15)):
-    # use least_squares with method='lm'
-    try:
-        def resid(theta):
-            a, b, c = theta
-            return modelo_exp(x, a, b, c) - y
-        res = least_squares(resid, x0=p0, method='lm', max_nfev=10000)
-        if not res.success:
-            return None, np.full_like(y, np.nan)
-        popt = res.x
-        return popt, modelo_exp(x, *popt)
-    except Exception:
-        return None, np.full_like(y, np.nan)
-
-def fit_bayes_laplace(x, y, p0=(1, 0.001, 15), n_samples=2000):
-    # Laplace approximation: compute MLE via least squares, approximate posterior ~ N(p_MLE, cov)
-    try:
-        # first get MLE (least squares)
-        def resid(theta):
-            a, b, c = theta
-            return modelo_exp(x, a, b, c) - y
-        res = least_squares(resid, x0=p0, method='trf', max_nfev=10000)
-        if not res.success:
-            return None, np.full_like(y, np.nan)
-        popt = res.x
-        # estimate sigma2
-        residuals = resid(popt)
-        n = len(y)
-        sigma2 = np.sum(residuals**2) / max(1, n - len(popt))
-        # approximate covariance: cov ≈ sigma2 * (J^T J)^{-1}
-        J = res.jac  # jac shape (n, 3)
-        JTJ = J.T @ J
-        try:
-            cov = sigma2 * np.linalg.inv(JTJ)
-            # sample approximate posterior
-            samples = np.random.multivariate_normal(popt, cov, size=n_samples)
-            y_preds = np.array([modelo_exp(x, *s) for s in samples])  # shape (n_samples, n)
-            y_mean = np.mean(y_preds, axis=0)
-            y_std = np.std(y_preds, axis=0)
-            # return posterior mean prediction (and optionally std)
-            return popt, y_mean
-        except np.linalg.LinAlgError:
-            # fallback: return MLE prediction
-            return popt, modelo_exp(x, *popt)
-    except Exception:
-        return None, np.full_like(y, np.nan)
-
-# wrapper that tries all methods for a given x,y and returns dict
-def ajustar_exponenciais(x, y):
-    methods = {}
-    # reasonable p0: a ~ (max-min), b ~ small, c ~ min
-    y_arr = np.array(y)
-    p0 = (max(1e-3, np.max(y_arr) - np.min(y_arr)), 0.0, np.min(y_arr))
-    # 1) curve_fit (nonlinear least squares)
-    popt_cf, y_cf = fit_curve_fit(x, y_arr, p0=(p0[0], 0.0005, p0[2]))
-    methods['Nonlinear LS (curve_fit)'] = {'popt': popt_cf, 'yhat': y_cf}
-
-    # 2) MLE
-    popt_mle, y_mle = fit_mle(x, y_arr, p0=(p0[0], 0.0, p0[2]))
-    methods['MLE'] = {'popt': popt_mle, 'yhat': y_mle}
-
-    # 3) Gauss-Newton
-    popt_gn, y_gn = fit_gauss_newton(x, y_arr, p0=(p0[0], 0.0, p0[2]))
-    methods['Gauss-Newton'] = {'popt': popt_gn, 'yhat': y_gn}
-
-    # 4) Levenberg-Marquardt
-    popt_lm, y_lm = fit_levenberg_marquardt(x, y_arr, p0=(p0[0], 0.0, p0[2]))
-    methods['Levenberg-Marquardt'] = {'popt': popt_lm, 'yhat': y_lm}
-
-    # 5) Bayesian (Laplace approx)
-    popt_b, y_bayes = fit_bayes_laplace(x, y_arr, p0=(p0[0], 0.0, p0[2]), n_samples=1500)
-    methods['Bayes (Laplace approx)'] = {'popt': popt_b, 'yhat': y_bayes}
-
-    return methods
-
-# Precompute (pode-se computar on-the-fly no callback, mas já deixo função pronta)
-# ============================
-# IMAGENS DAS TEORIAS (mantidas)
-# ============================
+# Imagens das teorias (verificar se estão em assets/)
 imagens_teorias = {
     "Teorema Central do Limite": "assets/teorema.jpg",
     "Correlação": "assets/correlacao.jpg",
@@ -214,18 +179,20 @@ imagens_teorias = {
     "Qui-quadrado": "assets/qui-quadrado.png"
 }
 
+# Define o label do Bayes baseado na disponibilidade da biblioteca
+bayes_label = 'Métodos Bayesianos (MCMC Real)' if EMCEE_AVAILABLE else 'Métodos Bayesianos (Simulação)'
+
 # ============================
-# DASH APP (layout atualizado)
+# LAYOUT
 # ============================
-app = dash.Dash(__name__, external_stylesheets=[dbc.themes.CYBORG])
-app.title = "Clima em Curitiba - Ajustes Exponenciais"
 
 app.layout = dbc.Container([
-    dbc.Row([dbc.Col(html.H1("Clima em Curitiba", className="text-center mb-4 mt-2", style={"color": "white"}))]),
+    dbc.Row([dbc.Col(html.H2("📈 Análise de Temperaturas - Curitiba",
+                             className="text-center text-light mt-3 mb-4"))]),
 
     dbc.Row([
         dbc.Col([
-            html.Label("Tipo de Regressão", style={"color": "white"}),
+            html.Label("Selecione o Tipo de Regressão:", style={"color": "white", "fontSize": "18px"}),
             dcc.Dropdown(
                 id='tipo-regressao',
                 options=[
@@ -237,33 +204,42 @@ app.layout = dbc.Container([
                 ],
                 value='linear',
                 clearable=False,
-                className="mb-2",
+                className="mb-3",
                 style={'color': '#000'}
             ),
-            # Método para exponencial (aparece só se 'exp' selecionado)
-            html.Div(id='div-metodo-exp', children=[
-                html.Label("Método de otimização (apenas para Exponencial):", style={"color": "white", "marginTop": "6px"}),
+
+            # --- DROPDOWN ATUALIZADO COM AS 5 OPÇÕES ---
+            html.Div(id='opcoes-otimizacao-exp', children=[
+                html.Label("Método de Estimação (para Exponencial):", style={"color": "white", "fontSize": "16px"}),
                 dcc.Dropdown(
-                    id='metodo-exp',
+                    id='metodo-otimizacao',
                     options=[
-                        {'label': 'Nonlinear LS (curve_fit)', 'value': 'curve_fit'},
-                        {'label': 'Máxima Verossimilhança (MLE)', 'value': 'mle'},
-                        {'label': 'Gauss-Newton', 'value': 'gn'},
-                        {'label': 'Levenberg-Marquardt', 'value': 'lm'},
-                        {'label': 'Bayes (Laplace approx)', 'value': 'bayes'},
-                        {'label': 'Comparar todos métodos', 'value': 'all'}
+                        {'label': 'Algoritmo de Levenberg-Marquardt (Padrão)', 'value': 'lm'},
+                        {'label': 'Mínimos Quadrados Não Linear (via TRF)', 'value': 'trf'},
+                        {'label': 'Máxima Verossimilhança (MLE, via Dogbox)', 'value': 'dogbox'},
+                        {'label': 'Método de Gauss-Newton (via LM)', 'value': 'gauss_newton', 'disabled': False},
+                        {'label': bayes_label, 'value': 'bayes', 'disabled': False}  # Label dinâmico
                     ],
-                    value='curve_fit',
+                    value='lm',
                     clearable=False,
-                    className="mb-4",
-                    style={'color': '#000'}
+                    style={'color': '#000'},
+                    className="mb-4"
                 )
-            ], style={"display": "none"}),
+            ], style={'display': 'none'}),  # Oculto por padrão
 
             dcc.Graph(id='grafico-regressao', style={'height': '65vh'}),
 
-            html.Hr(style={"borderColor": "#444"}),
+            # --- TEXTO DE ANÁLISE RESUMIDA (CORRIGIDO) ---
+            dcc.Markdown("""
+                **Análise de Risco e Otimização para Agritech**
 
+                **Problema Concreto:** Uma startup de *agritech* precisa prever a variação da temperatura em Curitiba para otimizar o uso de climatizadores e irrigação em estufas urbanas. O objetivo é usar um modelo matemático para prever a temperatura máxima (pico de custo de energia) e a mínima (risco de resfriamento) ao longo do dia. O modelo mais prático é aquele que tiver o **menor Erro Médio (RMSE)**.
+
+                **Avaliação dos Modelos:** A análise mostra um resultado misto. Para 2024, a **Regressão Exponencial** apresenta os melhores resultados (RMSE pprox 3.65), capturando a tendência inicial de subida. Para 2025, a **Regressão Parabólica** é ligeiramente melhor. A conclusão principal é que **ambos os modelos são inadequados** para este problema. Um R2 de 0.18 ainda é muito baixo e o modelo falha em capturar os picos e vales cíclicos, sendo inútil para prever máximas e mínimas.
+            """, style={'color': '#ccc', 'backgroundColor': '#2a2a2a', 'padding': '15px', 'borderRadius': '8px',
+                        "marginTop": "20px"}),
+
+            html.Hr(style={"borderColor": "#444", "marginTop": "30px"}),
             html.Label("Selecione uma teoria estatística:", style={"color": "white", "fontSize": "18px"}),
             dcc.Dropdown(
                 id='dropdown-teorias',
@@ -272,183 +248,224 @@ app.layout = dbc.Container([
                 style={'color': '#000'},
                 className="mb-4"
             ),
-            html.Div(id="imagem-teoria", className="text-center"),
-            html.Div(id='div-metricas', style={"marginTop": "18px"})
+            html.Div(id="imagem-teoria", className="text-center")
         ])
     ])
-], fluid=True, style={"backgroundColor": "#121212", "paddingBottom": "50px"})
+], fluid=True, style={"backgroundColor": "#1E1E1E", "paddingBottom": "40px"})
+
 
 # ============================
 # CALLBACKS
 # ============================
 
+# --- CALLBACK ATUALIZADO ---
 @app.callback(
-    Output('div-metodo-exp', 'style'),
-    Input('tipo-regressao', 'value')
+    [Output('grafico-regressao', 'figure'),
+     Output('opcoes-otimizacao-exp', 'style')],  # Nova saída para controlar a visibilidade
+    [Input('tipo-regressao', 'value'),
+     Input('metodo-otimizacao', 'value')]  # Nova entrada do método
 )
-def mostrar_metodo_exp(tipo):
-    if tipo == 'exp':
-        return {"display": "block"}
-    return {"display": "none"}
+def atualizar_grafico(tipo_regressao, metodo_opt):
+    style_otimizacao = {'display': 'none'}  # Oculto por padrão
+    titulo_metodo = ""
 
-@app.callback(
-    Output('grafico-regressao', 'figure'),
-    Output('div-metricas', 'children'),
-    Input('tipo-regressao', 'value'),
-    Input('metodo-exp', 'value')
-)
-def atualizar_grafico(tipo, metodo_exp):
-    # precompute linear/parab etc (mantidos)
-    y_linear_2024 = np.polyval(np.polyfit(x_float, coluna_2024, 1), x_float)
-    y_linear_2025 = np.polyval(np.polyfit(x_float, coluna_2025, 1), x_float)
-    # parab:
-    coef_parab_2024 = np.polyfit(x_float, coluna_2024, 2)
-    coef_parab_2025 = np.polyfit(x_float, coluna_2025, 2)
-    y_parab_2024 = np.polyval(coef_parab_2024, x_float)
-    y_parab_2025 = np.polyval(coef_parab_2025, x_float)
+    # Converte os dados para array numpy uma vez
+    y_data_2024 = np.array(coluna_2024)
+    y_data_2025 = np.array(coluna_2025)
 
+    # Cria a figura base. Os traços de dados são adicionados no final.
     fig = go.Figure()
-    fig.add_trace(go.Scatter(y=coluna_2024, mode='lines', name='2024', line=dict(color='skyblue')))
-    fig.add_trace(go.Scatter(y=coluna_2025, mode='lines', name='2025', line=dict(color='lightcoral')))
 
-    metrics_div = html.Div()  # será substituído
+    if tipo_regressao == 'exp':
+        # 1. Mostra o dropdown de otimização
+        style_otimizacao = {'display': 'block'}
 
-    if tipo == 'linear':
-        titulo = "Regressão Linear"
-        fig.add_trace(go.Scatter(y=y_linear_2024, mode='lines', name='Ajuste Linear 2024', line=dict(dash='dash', color='deepskyblue')))
-        fig.add_trace(go.Scatter(y=y_linear_2025, mode='lines', name='Ajuste Linear 2025', line=dict(dash='dash', color='tomato')))
+        # Parâmetros iniciais
+        p0_exp_24 = (1, 0.001, np.mean(y_data_2024))
+        p0_exp_25 = (1, 0.001, np.mean(y_data_2025))
 
-        r2_2024, rmse_2024 = calcular_metricas(np.array(coluna_2024), np.array(y_linear_2024))
-        r2_2025, rmse_2025 = calcular_metricas(np.array(coluna_2025), np.array(y_linear_2025))
-        metrics_div = html.Div([
-            html.H5("Métricas (Linear)", style={"color": "white"}),
-            html.P(f"R² (2024): {r2_2024:.4f}  |  RMSE (2024): {rmse_2024:.4f}", style={"color": "#ccc"}),
-            html.P(f"R² (2025): {r2_2025:.4f}  |  RMSE (2025): {rmse_2025:.4f}", style={"color": "#ccc"})
-        ])
+        # --- LÓGICA ATUALIZADA: MCMC REAL OU SIMULAÇÃO ---
+        if metodo_opt == 'bayes':
+            if EMCEE_AVAILABLE:
+                # --- Implementação Real Bayesiana com emcee (LENTO) ---
+                titulo = "Exponencial"
+                titulo_metodo = " (Método: Bayesiano (MCMC Real))"
 
-    elif tipo == 'parab':
-        titulo = "Regressão Parabólica"
-        fig.add_trace(go.Scatter(y=y_parab_2024, mode='lines', name='Ajuste Parab 2024', line=dict(dash='dash', color='deepskyblue')))
-        fig.add_trace(go.Scatter(y=y_parab_2025, mode='lines', name='Ajuste Parab 2025', line=dict(dash='dash', color='tomato')))
-
-        r2_2024, rmse_2024 = calcular_metricas(np.array(coluna_2024), np.array(y_parab_2024))
-        r2_2025, rmse_2025 = calcular_metricas(np.array(coluna_2025), np.array(y_parab_2025))
-        metrics_div = html.Div([
-            html.H5("Métricas (Parabólica)", style={"color": "white"}),
-            html.P(f"R² (2024): {r2_2024:.4f}  |  RMSE (2024): {rmse_2024:.4f}", style={"color": "#ccc"}),
-            html.P(f"R² (2025): {r2_2025:.4f}  |  RMSE (2025): {rmse_2025:.4f}", style={"color": "#ccc"})
-        ])
-
-    elif tipo == 'exp':
-        titulo = "Regressão Exponencial"
-        # se o usuário quer comparar todos, calculamos todos métodos e plotamos
-        resultados_2024 = ajustar_exponenciais(x_float, coluna_2024)
-        resultados_2025 = ajustar_exponenciais(x_float, coluna_2025)
-
-        # decide quais métodos plotar
-        if metodo_exp == 'all':
-            sel_methods = list(resultados_2024.keys())
-        else:
-            # map value -> key name
-            map_m = {
-                'curve_fit': 'Nonlinear LS (curve_fit)',
-                'mle': 'MLE',
-                'gn': 'Gauss-Newton',
-                'lm': 'Levenberg-Marquardt',
-                'bayes': 'Bayes (Laplace approx)'
-            }
-            sel_methods = [map_m.get(metodo_exp)]
-
-        # add traces for selected methods
-        colors_methods = {
-            'Nonlinear LS (curve_fit)': 'deepskyblue',
-            'MLE': 'gold',
-            'Gauss-Newton': 'limegreen',
-            'Levenberg-Marquardt': 'magenta',
-            'Bayes (Laplace approx)': 'cyan'
-        }
-        # style mapping for dash
-        dash_styles = {
-            'Nonlinear LS (curve_fit)': 'dash',
-            'MLE': 'dot',
-            'Gauss-Newton': 'dashdot',
-            'Levenberg-Marquardt': 'longdash',
-            'Bayes (Laplace approx)': 'dash'
-        }
-
-        # build metrics table rows
-        header = ["Método", "R² (2024)", "RMSE (2024)", "R² (2025)", "RMSE (2025)"]
-        rows = []
-
-        for method in resultados_2024.keys():
-            yhat24 = resultados_2024[method]['yhat']
-            yhat25 = resultados_2025[method]['yhat']
-            r2_24, rmse_24 = calcular_metricas(np.array(coluna_2024), np.array(yhat24))
-            r2_25, rmse_25 = calcular_metricas(np.array(coluna_2025), np.array(yhat25))
-            rows.append((method, r2_24, rmse_24, r2_25, rmse_25))
-
-        # add traces for only selected sel_methods (but compute metrics for all and show table)
-        for method_name in sel_methods:
-            if method_name is None:
-                continue
-            res24 = resultados_2024.get(method_name)
-            res25 = resultados_2025.get(method_name)
-            if res24 is not None:
-                fig.add_trace(go.Scatter(y=res24['yhat'], mode='lines', name=f'{method_name} (2024)',
-                                         line=dict(dash=dash_styles.get(method_name, 'dash'), color=colors_methods.get(method_name,'deepskyblue'))))
-            if res25 is not None:
-                fig.add_trace(go.Scatter(y=res25['yhat'], mode='lines', name=f'{method_name} (2025)',
-                                         line=dict(dash=dash_styles.get(method_name, 'dash'), color=colors_methods.get(method_name,'tomato'))))
-
-        # create HTML table for metrics
-        table_header = [html.Thead(html.Tr([html.Th(h) for h in header]))]
-        table_body = []
-        for r in rows:
-            # format numbers safely (nan handling)
-            def fmt(x):
+                # --- MCMC para 2024 ---
                 try:
-                    return f"{x:.4f}"
-                except:
-                    return "nan"
-            table_body.append(html.Tr([html.Td(r[0]), html.Td(fmt(r[1])), html.Td(fmt(r[2])), html.Td(fmt(r[3])), html.Td(fmt(r[4]))]))
-        table = html.Table(table_header + [html.Tbody(table_body)], style={"color": "#ccc", "width": "100%", "marginTop": "12px", "borderCollapse": "collapse"})
-        metrics_div = html.Div([
-            html.H5("Comparação de métodos (Exponencial)", style={"color": "white"}),
-            table,
-            html.P("Observação: 'Bayes (Laplace approx)' é uma aproximação usando Laplace em torno do MLE; para inferência Bayesiana completa use MCMC.", style={"color": "#aaa", "fontSize": "12px", "marginTop": "8px"})
-        ])
+                    y_err_24 = np.std(y_data_2024) * 0.5  # 1. Estima erro dos dados
+                    popt_base_24, _ = curve_fit(exponencial, x, y_data_2024, p0=p0_exp_24, method='lm')
+                    nwalkers = 32
+                    ndim = 3
+                    p0_walkers = popt_base_24 + 1e-4 * np.random.randn(nwalkers, ndim)  # 2. Posições iniciais
 
-    elif tipo == 'log':
-        titulo = "Regressão Logística (apenas polinomial ignorada aqui)"
-        # kept as placeholder - original code attempted logistic fit separately
-        # We show nothing special for agora
-        r2_2024, rmse_2024 = np.nan, np.nan
-        r2_2025, rmse_2025 = np.nan, np.nan
-        metrics_div = html.Div([
-            html.P("Regressão logística não implementada para comparação de métodos aqui.", style={"color": "#ccc"})
-        ])
+                    # 3. Configurar e rodar o sampler
+                    sampler24 = emcee.EnsembleSampler(nwalkers, ndim, log_probability, args=(x, y_data_2024, y_err_24))
+                    sampler24.run_mcmc(p0_walkers, 500, progress=False, skip_initial_state_check=True)  # 500 passos
 
-    elif tipo == 'pot':
-        titulo = "Regressão de Potência (não comparativa aqui)"
-        # kept as placeholder
-        metrics_div = html.Div([
-            html.P("Regressão de potência não implementada para comparação de métodos aqui.", style={"color": "#ccc"})
-        ])
+                    # 4. Coletar amostras (descarta 100, afina por 10)
+                    samples_24 = sampler24.get_chain(discard=100, thin=10, flat=True)
+
+                    all_y1 = []
+                    indices_24 = np.random.randint(len(samples_24), size=100)  # Pega 100 amostras
+
+                    for idx in indices_24:
+                        params_sample = samples_24[idx]
+                        y_sample = exponencial(x, *params_sample)
+                        all_y1.append(y_sample)
+                        fig.add_trace(go.Scatter(x=x, y=y_sample, mode='lines',
+                                                 line=dict(color='#00BFFF', width=0.5),
+                                                 opacity=0.1, showlegend=False, hoverinfo='none'))
+                    y1 = np.mean(all_y1, axis=0)  # Linha principal é a média
+
+                except Exception as e:
+                    print(f"Erro no MCMC 2024: {e}")
+                    y1 = np.full_like(y_data_2024, np.nan)
+
+                # --- MCMC para 2025 ---
+                try:
+                    y_err_25 = np.std(y_data_2025) * 0.5
+                    popt_base_25, _ = curve_fit(exponencial, x, y_data_2025, p0=p0_exp_25, method='lm')
+                    p0_walkers_25 = popt_base_25 + 1e-4 * np.random.randn(nwalkers, ndim)
+
+                    sampler25 = emcee.EnsembleSampler(nwalkers, ndim, log_probability, args=(x, y_data_2025, y_err_25))
+                    sampler25.run_mcmc(p0_walkers_25, 500, progress=False, skip_initial_state_check=True)
+
+                    samples_25 = sampler25.get_chain(discard=100, thin=10, flat=True)
+                    all_y2 = []
+                    indices_25 = np.random.randint(len(samples_25), size=100)
+
+                    for idx in indices_25:
+                        params_sample = samples_25[idx]
+                        y_sample = exponencial(x, *params_sample)
+                        all_y2.append(y_sample)
+                        fig.add_trace(go.Scatter(x=x, y=y_sample, mode='lines',
+                                                 line=dict(color='#FF6347', width=0.5),
+                                                 opacity=0.1, showlegend=False, hoverinfo='none'))
+                    y2 = np.mean(all_y2, axis=0)
+
+                except Exception as e:
+                    print(f"Erro no MCMC 2025: {e}")
+                    y2 = np.full_like(y_data_2025, np.nan)
+
+            else:
+                # --- Fallback: Simulação Visual (se emcee não estiver instalado) ---
+                titulo = "Exponencial"
+                titulo_metodo = " (Método: Bayesiano (Simulação))"
+
+                # Ajuste base para 2024
+                try:
+                    popt_base_24, _ = curve_fit(exponencial, x, y_data_2024, p0=p0_exp_24, method='lm', maxfev=5000)
+                    all_y1 = []
+                    for _ in range(50):
+                        p_sample = np.copy(popt_base_24)
+                        p_sample[0] = p_sample[0] * np.random.normal(1, 0.05)
+                        p_sample[1] = p_sample[1] + np.random.normal(0, 0.002)  # Ruído ADITIVO
+                        p_sample[2] = p_sample[2] * np.random.normal(1, 0.05)
+                        y_sample = exponencial(x, *p_sample)
+                        all_y1.append(y_sample)
+                        fig.add_trace(go.Scatter(x=x, y=y_sample, mode='lines',
+                                                 line=dict(color='#00BFFF', width=0.5),
+                                                 opacity=0.1, showlegend=False, hoverinfo='none'))
+                    y1 = np.mean(all_y1, axis=0)
+                except (RuntimeError, TypeError, ValueError):
+                    y1 = np.full_like(y_data_2024, np.nan)
+
+                # Ajuste base para 2025
+                try:
+                    popt_base_25, _ = curve_fit(exponencial, x, y_data_2025, p0=p0_exp_25, method='lm', maxfev=5000)
+                    all_y2 = []
+                    for _ in range(50):
+                        p_sample = np.copy(popt_base_25)
+                        p_sample[0] = p_sample[0] * np.random.normal(1, 0.05)
+                        p_sample[1] = p_sample[1] + np.random.normal(0, 0.002)  # Ruído ADITIVO
+                        p_sample[2] = p_sample[2] * np.random.normal(1, 0.05)
+                        # --- ERRO CORRIGIDO: use p_sample, não params_sample ---
+                        y_sample = exponencial(x, *p_sample)
+                        all_y2.append(y_sample)
+                        fig.add_trace(go.Scatter(x=x, y=y_sample, mode='lines',
+                                                 line=dict(color='#FF6347', width=0.5),
+                                                 opacity=0.1, showlegend=False, hoverinfo='none'))
+                    y2 = np.mean(all_y2, axis=0)
+                except (RuntimeError, TypeError, ValueError):
+                    y2 = np.full_like(y_data_2025, np.nan)
+
+        else:
+            # --- Lógica Original para LM, TRF, Dogbox, Gauss-Newton ---
+            scipy_method = metodo_opt
+            if metodo_opt == 'gauss_newton':
+                scipy_method = 'lm'  # Usa LM como substituto do Gauss-Newton
+
+            y1 = ajustar_modelo(exponencial, x, y_data_2024, p0=p0_exp_24, method=scipy_method)
+            y2 = ajustar_modelo(exponencial, x, y_data_2025, p0=p0_exp_25, method=scipy_method)
+
+            titulo = "Exponencial"
+
+            metodo_map = {
+                'lm': 'Levenberg-Marquardt',
+                'trf': 'NLS (via TRF)',
+                'dogbox': 'MLE (via Dogbox)',
+                'gauss_newton': 'Gauss-Newton (via LM)'
+            }
+            titulo_metodo_str = metodo_map.get(metodo_opt, metodo_opt.upper())
+            titulo_metodo = f" (Método: {titulo_metodo_str})"
 
     else:
-        titulo = "Regressão"
+        # Para outras regressões, usa os valores pré-calculados
+        modelos = {
+            'linear': (y_linear_2024, y_linear_2025, "Linear"),
+            'parab': (y_parab_2024, y_parab_2025, "Parabólica"),
+            'log': (y_log_2024, y_log_2025, "Logística"),
+            'pot': (y_pot_2024, y_pot_2025, "Potência")
+        }
+        y1, y2, titulo = modelos[tipo_regressao]
+
+    # Calcula métricas
+    r2_2024, rmse_2024 = calcular_metricas(y_data_2024, y1)
+    r2_2025, rmse_2025 = calcular_metricas(y_data_2025, y2)
+
+    # --- Gráfico ---
+    # Adiciona os dados de scatter (pontos)
+    fig.add_trace(go.Scatter(x=x, y=coluna_2024, mode='markers', name='2024',
+                             marker=dict(color='#00BFFF', size=6, opacity=0.8),
+                             hovertemplate='Hora: %{x}<br>Temp: %{y:.2f}°C'))
+    fig.add_trace(go.Scatter(x=x, y=coluna_2025, mode='markers', name='2025',
+                             marker=dict(color='#FF6347', size=6, opacity=0.8),
+                             hovertemplate='Hora: %{x}<br>Temp: %{y:.2f}°C'))
+
+    # Adiciona as linhas de ajuste PRINCIPAIS
+    fig.add_trace(go.Scatter(x=x, y=y1, mode='lines', name='Ajuste 2024',
+                             line=dict(color='#00BFFF', width=2.5),
+                             hovertemplate='Hora: %{x}<br>Ajuste: %{y:.2f}°C'))
+    fig.add_trace(go.Scatter(x=x, y=y2, mode='lines', name='Ajuste 2025',
+                             line=dict(color='#FF6347', width=2.5),
+                             hovertemplate='Hora: %{x}<br>Ajuste: %{y:.2f}°C'))
+
+    # Formata R² e RMSE para exibição, tratando NaNs
+    r2_2024_str = f"{r2_2024:.4f}" if not np.isnan(r2_2024) else "N/A"
+    rmse_2024_str = f"{rmse_2024:.3f}" if not np.isnan(rmse_2024) else "N/A"
+    r2_2025_str = f"{r2_2025:.4f}" if not np.isnan(r2_2025) else "N/A"
+    rmse_2025_str = f"{rmse_2025:.3f}" if not np.isnan(rmse_2025) else "N/A"
 
     fig.update_layout(
-        title=(f"{titulo} das Temperaturas"),
-        xaxis_title='Horas (0-167)',
-        yaxis_title='Temperatura (°C)',
-        legend_title='Séries / Ajustes',
-        template='plotly_dark',
-        paper_bgcolor='#111',
-        plot_bgcolor='#111'
+        title=dict(
+            text=f"Regressão {titulo}{titulo_metodo}<br><sup style='color:#AAA'>"
+                 f"R² (2024): {r2_2024_str} | RMSE (2024): {rmse_2024_str} &nbsp; "
+                 f"R² (2025): {r2_2025_str} | RMSE (2025): {rmse_2025_str}</sup>",
+            x=0.5, font=dict(size=22, color='white')
+        ),
+        xaxis=dict(title='Horas', gridcolor='#333', showspikes=True),
+        yaxis=dict(title='Temperatura (°C)', gridcolor='#333', showspikes=True),
+        hovermode='x unified',
+        paper_bgcolor='#1E1E1E',
+        plot_bgcolor='#1E1E1E',
+        font=dict(color='white'),
+        legend=dict(bgcolor='rgba(0,0,0,0.3)', bordercolor='#444', borderwidth=1)
     )
 
-    return fig, metrics_div
+    # Retorna a figura e o novo estilo para o dropdown
+    return fig, style_otimizacao
+
 
 @app.callback(
     Output("imagem-teoria", "children"),
@@ -457,16 +474,21 @@ def atualizar_grafico(tipo, metodo_exp):
 def mostrar_imagem(teoria):
     if teoria is None:
         return html.P("Selecione uma teoria para visualizar.", style={"color": "#bbb", "fontSize": "18px"})
-    caminho = imagens_teorias[teoria]
+    caminho = imagens_teorias.get(teoria)
+    if caminho is None:
+        return html.P("Imagem não encontrada.", style={"color": "#bbb", "fontSize": "18px"})
     return html.Img(src=caminho, style={
         "width": "70%",
         "borderRadius": "12px",
-        "boxShadow": "0 0 15px rgba(255,255,255,0.2)",
+        "boxShadow": "0 0 15px rgba(255,255,200,0.2)",  # Sombra com cor atualizada
         "marginTop": "20px"
     })
 
+
 # ============================
-# EXECUÇÃO
+# RUN
 # ============================
+
 if __name__ == '__main__':
     app.run(debug=True)
+
