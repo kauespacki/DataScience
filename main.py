@@ -5,8 +5,15 @@ import plotly.graph_objs as go
 import numpy as np
 import dash_bootstrap_components as dbc
 from scipy.optimize import curve_fit
-import emcee
-EMCEE_AVAILABLE = True
+
+# Tenta importar emcee, mas define uma flag se não estiver disponível
+try:
+    import emcee
+
+    EMCEE_AVAILABLE = True
+except ImportError:
+    EMCEE_AVAILABLE = False
+    print("Biblioteca 'emcee' não encontrada. O modo Bayesiano MCMC Real será desativado (usará simulação).")
 
 # ============================
 # DADOS
@@ -66,52 +73,111 @@ def potencia(x, a, b):
 
 
 # ============================
+# FUNÇÃO GAUSS-NEWTON (PURO)
+# ============================
+
+def gauss_newton_fit(x, y, p0, max_iter=100, tol=1e-6):
+    """
+    Implementa o algoritmo Gauss-Newton puro para a função exponencial.
+    f(x, a, b, c) = a * exp(b*x) + c
+    """
+    params = np.array(p0, dtype=float)  # Garante que params seja float
+
+    for _ in range(max_iter):
+        a, b, c = params
+
+        # 1. Calcular resíduos
+        y_model = exponencial(x, a, b, c)
+        residuals = y - y_model
+
+        # 2. Calcular Jacobiana
+        df_da = np.exp(b * x)
+        df_db = a * x * np.exp(b * x)
+        df_dc = np.ones_like(x)
+
+        # J é (n_samples, n_params)
+        J = np.stack([df_da, df_db, df_dc], axis=1)
+
+        # 3. Resolver o sistema linear (J.T @ J) @ delta = J.T @ residuals
+        # Usar np.linalg.solve é mais estável e rápido do que calcular a inversa
+        try:
+            JtJ = J.T @ J
+            JtRes = J.T @ residuals
+            # delta = (J.T * J)^-1 * (J.T * r)
+            delta = np.linalg.solve(JtJ, JtRes)
+        except np.linalg.LinAlgError:
+            # Matriz singular, o método falha (um problema comum no Gauss-Newton puro)
+            # Retorna os últimos parâmetros válidos
+            return params
+
+            # 4. Atualizar parâmetros
+        params = params + delta
+
+        # 5. Checar convergência
+        if np.sum(delta ** 2) < tol ** 2:
+            break
+
+    return params
+
+
+def ajustar_modelo_gn(x, y, p0):
+    """Wrapper para o gauss_newton_fit para tratar erros e retornar a curva."""
+    try:
+        popt = gauss_newton_fit(x, np.array(y), p0)
+        return exponencial(x, *popt)
+    except Exception as e:
+        # Captura outros erros (ex: overflow no np.exp)
+        return np.full_like(y, np.nan)
+
+
+# ============================
 # FUNÇÕES PARA MCMC BAYESIANO (emcee)
 # Parâmetros: [a, b, c]
 # ============================
 
-def log_prior(params):
-    """Define a probabilidade prévia dos parâmetros (priors)."""
-    a, b, c = params
-    # Define priors "planos" (pouca informação prévia)
-    # Supomos que 'a' e 'c' estão entre 0 e 50 (razoável para temp)
-    # --- CORREÇÃO: O prior de 'b' de -0.1 a 0.1 estava muito frouxo, causando divergências.
-    # --- Restringindo para -0.01 a 0.01 ---
-    if 0.0 < a < 50.0 and -0.01 < b < 0.01 and 0.0 < c < 50.0:
-        return 0.0  # Probabilidade logarítmica de 0 (probabilidade de 1)
-    return -np.inf  # Probabilidade logarítmica de -infinito (probabilidade de 0)
+# Verifica se o emcee está disponível antes de definir funções que dependem dele
+if EMCEE_AVAILABLE:
+    def log_prior(params):
+        """Define a probabilidade prévia dos parâmetros (priors)."""
+        a, b, c = params
+        # Define priors "planos" (pouca informação prévia)
+        # Supomos que 'a' e 'c' estão entre 0 e 50 (razoável para temp)
+        # --- CORREÇÃO: O prior de 'b' de -0.1 a 0.1 estava muito frouxo, causando divergências.
+        # --- Restringindo para -0.01 a 0.01 ---
+        if 0.0 < a < 50.0 and -0.01 < b < 0.01 and 0.0 < c < 50.0:
+            return 0.0  # Probabilidade logarítmica de 0 (probabilidade de 1)
+        return -np.inf  # Probabilidade logarítmica de -infinito (probabilidade de 0)
 
 
-def log_likelihood(params, x, y_obs, y_err):
-    """Define a verossimilhança (likelihood) - quão bem o modelo se ajusta aos dados."""
-    a, b, c = params
-    y_model = exponencial(x, a, b, c)
+    def log_likelihood(params, x, y_obs, y_err):
+        """Define a verossimilhança (likelihood) - quão bem o modelo se ajusta aos dados."""
+        a, b, c = params
+        y_model = exponencial(x, a, b, c)
 
-    # Supõe que os erros são Gaussianos
-    # log(L) = -0.5 * sum( ((y_obs - y_model) / y_err)**2 + log(2*pi*y_err**2) )
-    sigma2 = y_err ** 2
-    return -0.5 * np.sum((y_obs - y_model) ** 2 / sigma2 + np.log(2 * np.pi * sigma2))
+        # Supõe que os erros são Gaussianos
+        # log(L) = -0.5 * sum( ((y_obs - y_model) / y_err)**2 + log(2*pi*y_err**2) )
+        sigma2 = y_err ** 2
+        return -0.5 * np.sum((y_obs - y_model) ** 2 / sigma2 + np.log(2 * np.pi * sigma2))
 
 
-def log_probability(params, x, y_obs, y_err):
-    """Combina o prior e a likelihood."""
-    lp = log_prior(params)
-    if not np.isfinite(lp):
-        return -np.inf
-    ll = log_likelihood(params, x, y_obs, y_err)
-    if not np.isfinite(ll):
-        return -np.inf
-    return lp + ll
+    def log_probability(params, x, y_obs, y_err):
+        """Combina o prior e a likelihood."""
+        lp = log_prior(params)
+        if not np.isfinite(lp):
+            return -np.inf
+        ll = log_likelihood(params, x, y_obs, y_err)
+        if not np.isfinite(ll):
+            return -np.inf
+        return lp + ll
 
 
 # ============================
-# FUNÇÃO DE AJUSTE
+# FUNÇÃO DE AJUSTE (SCIPY)
 # ============================
 
 def ajustar_modelo(modelo, x, y, p0=None, method='lm'):
     """
-    Ajusta um modelo aos dados x, y.
-    Agora aceita um parâmetro 'method' para ser passado ao curve_fit.
+    Ajusta um modelo aos dados x, y, usando scipy.curve_fit.
     Métodos comuns: 'lm' (padrão), 'trf', 'dogbox'.
     """
     try:
@@ -171,6 +237,8 @@ app = dash.Dash(__name__, external_stylesheets=[dbc.themes.SLATE])
 app.title = "Análise de Temperaturas - Data Science View"
 
 # Imagens das teorias (verificar se estão em assets/)
+# Certifique-se de ter uma pasta 'assets' no mesmo diretório do seu app_corrigido.py
+# e que as imagens estejam lá.
 imagens_teorias = {
     "Teorema Central do Limite": "assets/teorema.jpg",
     "Correlação": "assets/correlacao.jpg",
@@ -208,7 +276,7 @@ app.layout = dbc.Container([
                 style={'color': '#000'}
             ),
 
-            # --- DROPDOWN ATUALIZADO COM AS 5 OPÇÕES ---
+            # --- DROPDOWN ATUALIZADO ---
             html.Div(id='opcoes-otimizacao-exp', children=[
                 html.Label("Método de Estimação (para Exponencial):", style={"color": "white", "fontSize": "16px"}),
                 dcc.Dropdown(
@@ -217,8 +285,9 @@ app.layout = dbc.Container([
                         {'label': 'Algoritmo de Levenberg-Marquardt (Padrão)', 'value': 'lm'},
                         {'label': 'Mínimos Quadrados Não Linear (via TRF)', 'value': 'trf'},
                         {'label': 'Máxima Verossimilhança (MLE, via Dogbox)', 'value': 'dogbox'},
-                        {'label': 'Método de Gauss-Newton (via LM)', 'value': 'gauss_newton', 'disabled': False},
-                        {'label': bayes_label, 'value': 'bayes', 'disabled': False}  # Label dinâmico
+                        {'label': 'Gauss-Newton (Puro)', 'value': 'gauss_newton'},  # ADICIONADO DE VOLTA
+                        {'label': bayes_label, 'value': 'bayes', 'disabled': not EMCEE_AVAILABLE}
+                        # Desativa se emcee não estiver instalado
                     ],
                     value='lm',
                     clearable=False,
@@ -235,7 +304,7 @@ app.layout = dbc.Container([
 
                 **Problema Concreto:** Uma startup de *agritech* precisa prever a variação da temperatura em Curitiba para otimizar o uso de climatizadores e irrigação em estufas urbanas. O objetivo é usar um modelo matemático para prever a temperatura máxima (pico de custo de energia) e a mínima (risco de resfriamento) ao longo do dia. O modelo mais prático é aquele que tiver o **menor Erro Médio (RMSE)**.
 
-                **Avaliação dos Modelos:** A análise mostra um resultado misto. Para 2024, a **Regressão Exponencial** apresenta os melhores resultados (RMSE pprox 3.65), capturando a tendência inicial de subida. Para 2025, a **Regressão Parabólica** é ligeiramente melhor. A conclusão principal é que **ambos os modelos são inadequados** para este problema. Um R2 de 0.18 ainda é muito baixo e o modelo falha em capturar os picos e vales cíclicos, sendo inútil para prever máximas e mínimas.
+                **Avaliação dos Modelos:** A análise mostra um resultado misto. Para 2024, a **Regressão Exponencial** apresenta os melhores resultados (RMSE pprox 3.65), capturando a tendência inicial de subida. Para 2025, a **Regressão Parabólica** é ligeiramente melhor. A conclusão principal é que **ambos os modelos são inadequADOS** para este problema. Um R2 de 0.18 ainda é muito baixo e o modelo falha em capturar os picos e vales cíclicos, sendo inútil para prever máximas e mínimas.
             """, style={'color': '#ccc', 'backgroundColor': '#2a2a2a', 'padding': '15px', 'borderRadius': '8px',
                         "marginTop": "20px"}),
 
@@ -273,6 +342,24 @@ def atualizar_grafico(tipo_regressao, metodo_opt):
     y_data_2024 = np.array(coluna_2024)
     y_data_2025 = np.array(coluna_2025)
 
+    # --- CORREÇÃO: Parâmetros iniciais (p0) melhorados ---
+    # Usar o valor mínimo como estimativa para 'c' (assíntota inferior)
+    # Usar o primeiro ponto (x=0) para estimar 'a' (pois y[0] = a*exp(0) + c = a + c)
+
+    p0_c_24 = np.min(y_data_2024)
+    p0_a_24 = y_data_2024[0] - p0_c_24
+    # Garante que 'a' seja um valor positivo pequeno se y[0] for o mínimo
+    if p0_a_24 <= 0:
+        p0_a_24 = 0.1
+    p0_exp_24 = (p0_a_24, 0.001, p0_c_24)  # (a, b, c)
+
+    p0_c_25 = np.min(y_data_2025)
+    p0_a_25 = y_data_2025[0] - p0_c_25
+    if p0_a_25 <= 0:
+        p0_a_25 = 0.1
+    p0_exp_25 = (p0_a_25, 0.001, p0_c_25)
+    # --- FIM DA CORREÇÃO ---
+
     # Cria a figura base. Os traços de dados são adicionados no final.
     fig = go.Figure()
 
@@ -280,9 +367,7 @@ def atualizar_grafico(tipo_regressao, metodo_opt):
         # 1. Mostra o dropdown de otimização
         style_otimizacao = {'display': 'block'}
 
-        # Parâmetros iniciais
-        p0_exp_24 = (1, 0.001, np.mean(y_data_2024))
-        p0_exp_25 = (1, 0.001, np.mean(y_data_2025))
+        # (Os p0 agora são definidos acima)
 
         # --- LÓGICA ATUALIZADA: MCMC REAL OU SIMULAÇÃO ---
         if metodo_opt == 'bayes':
@@ -294,6 +379,7 @@ def atualizar_grafico(tipo_regressao, metodo_opt):
                 # --- MCMC para 2024 ---
                 try:
                     y_err_24 = np.std(y_data_2024) * 0.5  # 1. Estima erro dos dados
+                    # Usa os p0 melhorados para o ajuste base
                     popt_base_24, _ = curve_fit(exponencial, x, y_data_2024, p0=p0_exp_24, method='lm')
                     nwalkers = 32
                     ndim = 3
@@ -362,7 +448,7 @@ def atualizar_grafico(tipo_regressao, metodo_opt):
                         p_sample[0] = p_sample[0] * np.random.normal(1, 0.05)
                         p_sample[1] = p_sample[1] + np.random.normal(0, 0.002)  # Ruído ADITIVO
                         p_sample[2] = p_sample[2] * np.random.normal(1, 0.05)
-                        y_sample = exponencial(x, *p_sample)
+                        y_sample = exponencial(x, *params_sample)
                         all_y1.append(y_sample)
                         fig.add_trace(go.Scatter(x=x, y=y_sample, mode='lines',
                                                  line=dict(color='#00BFFF', width=0.5),
@@ -380,7 +466,6 @@ def atualizar_grafico(tipo_regressao, metodo_opt):
                         p_sample[0] = p_sample[0] * np.random.normal(1, 0.05)
                         p_sample[1] = p_sample[1] + np.random.normal(0, 0.002)  # Ruído ADITIVO
                         p_sample[2] = p_sample[2] * np.random.normal(1, 0.05)
-                        # --- ERRO CORRIGIDO: use p_sample, não params_sample ---
                         y_sample = exponencial(x, *p_sample)
                         all_y2.append(y_sample)
                         fig.add_trace(go.Scatter(x=x, y=y_sample, mode='lines',
@@ -391,23 +476,26 @@ def atualizar_grafico(tipo_regressao, metodo_opt):
                     y2 = np.full_like(y_data_2025, np.nan)
 
         else:
-            # --- Lógica Original para LM, TRF, Dogbox, Gauss-Newton ---
-            scipy_method = metodo_opt
-            if metodo_opt == 'gauss_newton':
-                scipy_method = 'lm'  # Usa LM como substituto do Gauss-Newton
+            # --- Lógica para LM, TRF, Dogbox, E AGORA GAUSS-NEWTON ---
 
-            y1 = ajustar_modelo(exponencial, x, y_data_2024, p0=p0_exp_24, method=scipy_method)
-            y2 = ajustar_modelo(exponencial, x, y_data_2025, p0=p0_exp_25, method=scipy_method)
+            if metodo_opt == 'gauss_newton':
+                y1 = ajustar_modelo_gn(x, y_data_2024, p0=p0_exp_24)
+                y2 = ajustar_modelo_gn(x, y_data_2025, p0=p0_exp_25)
+                titulo_metodo_str = 'Gauss-Newton (Puro)'
+            else:
+                # Lógica original para os métodos do Scipy
+                scipy_method = metodo_opt
+                y1 = ajustar_modelo(exponencial, x, y_data_2024, p0=p0_exp_24, method=scipy_method)
+                y2 = ajustar_modelo(exponencial, x, y_data_2025, p0=p0_exp_25, method=scipy_method)
+
+                metodo_map = {
+                    'lm': 'Levenberg-Marquardt',
+                    'trf': 'NLS (via TRF)',
+                    'dogbox': 'MLE (via Dogbox)',
+                }
+                titulo_metodo_str = metodo_map.get(metodo_opt, metodo_opt.upper())
 
             titulo = "Exponencial"
-
-            metodo_map = {
-                'lm': 'Levenberg-Marquardt',
-                'trf': 'NLS (via TRF)',
-                'dogbox': 'MLE (via Dogbox)',
-                'gauss_newton': 'Gauss-Newton (via LM)'
-            }
-            titulo_metodo_str = metodo_map.get(metodo_opt, metodo_opt.upper())
             titulo_metodo = f" (Método: {titulo_metodo_str})"
 
     else:
@@ -476,9 +564,19 @@ def mostrar_imagem(teoria):
         return html.P("Selecione uma teoria para visualizar.", style={"color": "#bbb", "fontSize": "18px"})
     caminho = imagens_teorias.get(teoria)
     if caminho is None:
-        return html.P("Imagem não encontrada.", style={"color": "#bbb", "fontSize": "18px"})
-    return html.Img(src=caminho, style={
-        "width": "70%",
+        # Tenta carregar mesmo assim, caso o 'assets/' seja adicionado pelo Dash
+        caminho = teoria
+
+        # Adiciona uma verificação simples para imagens de exemplo se a pasta assets não estiver configurada
+    # Esta parte é mais para robustez, as imagens reais devem estar em 'assets/'
+    if teoria == "T-Student":
+        caminho = "assets/t-student.png"
+    elif teoria == "Qui-quadrado":
+        caminho = "assets/qui-quadrado.png"
+
+    return html.Img(src=app.get_asset_url(caminho.replace("assets/", "")), style={
+        "maxWidth": "70%",  # Use maxWidth para responsividade
+        "height": "auto",
         "borderRadius": "12px",
         "boxShadow": "0 0 15px rgba(255,255,200,0.2)",  # Sombra com cor atualizada
         "marginTop": "20px"
