@@ -5,6 +5,7 @@ import plotly.graph_objs as go
 import numpy as np
 import dash_bootstrap_components as dbc
 from scipy.optimize import curve_fit
+from statistics import multimode  # Importado para calcular a moda
 
 # Tenta importar emcee, mas define uma flag se não estiver disponível
 try:
@@ -48,6 +49,77 @@ coluna_2025 = [
 ]
 
 x = np.arange(len(coluna_2024))
+dados_2024 = np.array(coluna_2024)
+dados_2025 = np.array(coluna_2025)
+
+# ============================
+# CÁLCULOS ESTATÍSTICOS (NOVO)
+# ============================
+
+stats_2024 = {
+    "media": np.mean(dados_2024),
+    "mediana": np.median(dados_2024),
+    "moda": ', '.join(map(str, multimode(dados_2024))),  # Pode haver múltiplas modas
+    "std": np.std(dados_2024),
+    "var": np.var(dados_2024)
+}
+
+stats_2025 = {
+    "media": np.mean(dados_2025),
+    "mediana": np.median(dados_2025),
+    "moda": ', '.join(map(str, multimode(dados_2025))),
+    "std": np.std(dados_2025),
+    "var": np.var(dados_2025)
+}
+
+
+# Função para criar cartão de estatísticas (NOVO)
+def criar_cartao_stat(ano, stats):
+    return dbc.Card(
+        dbc.CardBody([
+            html.H5(f"Estatísticas {ano}", className="card-title text-info"),
+            html.P(f"Média: {stats['media']:.2f}°C"),
+            html.P(f"Mediana: {stats['mediana']:.2f}°C"),
+            html.P(f"Moda: {stats['moda']}°C"),
+            html.P(f"Desvio Padrão: {stats['std']:.2f}°C"),
+            html.P(f"Variância: {stats['var']:.2f}°C²"),
+        ]),
+        color="dark",
+        outline=True,
+        className="mb-3"
+    )
+
+
+# Criação da Figura do Gráfico de Barras (NOVO)
+nomes_stats = ['Média', 'Mediana', 'Desvio Padrão', 'Variância']
+valores_2024 = [stats_2024['media'], stats_2024['mediana'], stats_2024['std'], stats_2024['var']]
+valores_2025 = [stats_2025['media'], stats_2025['mediana'], stats_2025['std'], stats_2025['var']]
+
+fig_stats = go.Figure()
+fig_stats.add_trace(go.Bar(
+    x=nomes_stats,
+    y=valores_2024,
+    name='2024',
+    marker_color='#00BFFF',
+    hovertemplate='2024 - %{x}: %{y:.2f}'
+))
+fig_stats.add_trace(go.Bar(
+    x=nomes_stats,
+    y=valores_2025,
+    name='2025',
+    marker_color='#FF6347',
+    hovertemplate='2025 - %{x}: %{y:.2f}'
+))
+
+fig_stats.update_layout(
+    title='Comparativo de Estatísticas (2024 vs 2025)',
+    barmode='group',
+    xaxis_tickangle=-45,
+    paper_bgcolor='#1E1E1E',
+    plot_bgcolor='#1E1E1E',
+    font=dict(color='white'),
+    legend=dict(bgcolor='rgba(0,0,0,0.3)', bordercolor='#444', borderwidth=1)
+)
 
 
 # ============================
@@ -247,6 +319,60 @@ imagens_teorias = {
     "Qui-quadrado": "assets/qui-quadrado.png"
 }
 
+# (ATUALIZADO COM RESULTADOS FICTÍCIOS)
+textos_prescritiva = {
+    "Programação Linear": """
+    **Programação Linear (Aplicada com Resultados)**
+    
+    Usamos a PL para **minimizar o custo de energia** da estufa, com base na previsão do modelo e em custos fictícios.
+    
+    * **Cenário:** Prevê-se 15°C para as 05:00 (abaixo do mínimo de 18°C).
+    * **Custos Fictícios:** Aquecedor (R$ 4/h, +4°C/h), Resfriador (R$ 2.40/h, -2°C/h).
+    * **Problema:** `Minimizar Custo = 4*H + 2.4*R`
+    * **Restrição:** `Temp_Final = 15 + 4*H - 2*R` (onde `Temp_Final >= 18`)
+    
+    ---
+    
+    * **Resultado da Otimização (Prescrição):** O modelo prescreve a ação de menor custo.
+    * **Decisão:** Ligar o aquecedor por **45 minutos** (`H = 0.75`) e manter o resfriador desligado (`R = 0`).
+    * **Resultado Fictício:** `Temp_Final = 15 + 4*0.75 = 18°C`.
+    * **Custo Mínimo:** `R$ 4,00 * 0.75 = R$ 3,00` (evitando o custo de R$ 4,00 de uma hora inteira).
+    """,
+    "Simulação de Monte Carlo": """
+    **Simulação de Monte Carlo (Aplicada com Resultados)**
+    
+    Usamos a Simulação de Monte Carlo para **quantificar o risco financeiro**, dado que nosso modelo de previsão (Regressão Parabólica) tem um erro (RMSE) de ~3.8°C.
+    
+    * **Cenário:** A previsão de temp. máxima é de 28°C. O resfriador (R$ 2.40/h) só liga acima de 26°C.
+    * **Simulação:** Rodamos 10.000 "dias" fictícios, onde `Temp_Real = 28 + Erro_Aleatório` (com base no RMSE).
+    
+    ---
+    
+    * **Resultados da Simulação (Prescrição):**
+    * **Custo Médio Esperado:** R$ 12,50 (para o pico de calor).
+    * **Probabilidade de Custo Zero:** 35% (dias em que a temp. real ficou abaixo de 26°C, apesar da previsão de 28°C).
+    * **Pior Cenário (VaR 95%):** "Em 95% dos casos, o custo no pico não deve passar de R$ 28,00."
+    * **Decisão:** A agritech pode usar o VaR (R$ 28,00) para definir seu orçamento de risco diário.
+    """,
+    "Decision Tree": """
+    **Árvore de Decisão (Aplicada com Resultados)**
+    
+    Usamos uma Árvore de Decisão para **substituir** os modelos de regressão simples, pois eles falharam em capturar os picos e vales do dia (R² baixo).
+    
+    * **Cenário:** Treinamos uma Árvore de Decisão de Regressão usando `Hora_do_Dia` e `Mês` para prever a `Temperatura`.
+    
+    ---
+    
+    * **Resultados do Modelo (Fictício):**
+    * **Performance:** O **RMSE** do novo modelo (Árvore) caiu para **1.2°C** (comparado aos 3.8°C do modelo Parabólico). Uma melhoria de 3x.
+    * **Regras Aprendidas (Exemplo):** O modelo aprendeu automaticamente o ciclo dia/noite que a regressão simples ignorou:
+        * `SE (Hora >= 12 E Hora <= 15) ENTÃO Temp_Prevista = 29.1°C`
+        * `SE (Hora < 7) ENTÃO Temp_Prevista = 17.8°C`
+    * **Prescrição:** A empresa deve **descartar** os modelos de regressão simples e usar esta Árvore de Decisão como base para as previsões de temperatura na Programação Linear.
+    """
+}
+
+
 # Define o label do Bayes baseado na disponibilidade da biblioteca
 bayes_label = 'Métodos Bayesianos (MCMC Real)' if EMCEE_AVAILABLE else 'Métodos Bayesianos (Simulação)'
 
@@ -309,6 +435,29 @@ app.layout = dbc.Container([
                         "marginTop": "20px"}),
 
             html.Hr(style={"borderColor": "#444", "marginTop": "30px"}),
+
+            # --- SEÇÃO DE ESTATÍSTICAS (NOVO) ---
+            dbc.Row([
+                dbc.Col(html.H4("Estatísticas Descritivas", className="text-center text-light mt-4 mb-3"))
+            ]),
+            dbc.Row([
+                # Coluna para os cartões
+                dbc.Col([
+                    criar_cartao_stat("2024", stats_2024),
+                    criar_cartao_stat("2025", stats_2025)
+                ], md=4),
+
+                # Coluna para o gráfico de barras
+                dbc.Col([
+                    dcc.Graph(id='grafico-estatisticas', figure=fig_stats)
+                ], md=8),
+            ], className="mb-4"),
+
+            # --- SEÇÃO DE TEORIAS (EXISTENTE) ---
+            html.Hr(style={"borderColor": "#444", "marginTop": "30px"}),
+            dbc.Row([
+                dbc.Col(html.H4("Galeria de Teorias Estatísticas", className="text-center text-light mt-4 mb-3"))
+            ]),
             html.Label("Selecione uma teoria estatística:", style={"color": "white", "fontSize": "18px"}),
             dcc.Dropdown(
                 id='dropdown-teorias',
@@ -317,7 +466,34 @@ app.layout = dbc.Container([
                 style={'color': '#000'},
                 className="mb-4"
             ),
-            html.Div(id="imagem-teoria", className="text-center")
+            html.Div(id="imagem-teoria", className="text-center"),
+            
+            # --- SEÇÃO DE ESTATÍSTICA PRESCRITIVA (NOVO) ---
+            html.Hr(style={"borderColor": "#444", "marginTop": "30px"}),
+            dbc.Row([
+                dbc.Col(html.H4("Estatística Prescritiva (Aplicada ao Projeto)", className="text-center text-light mt-4 mb-3"))
+            ]),
+            html.Label("Selecione um tópico prescritivo:", style={"color": "white", "fontSize": "18px"}),
+            dcc.Dropdown(
+                id='dropdown-prescritiva',
+                options=[
+                    {'label': 'Programação Linear', 'value': 'Programação Linear'},
+                    {'label': 'Simulação de Monte Carlo', 'value': 'Simulação de Monte Carlo'},
+                    {'label': 'Árvore de Decisão (Decision Tree)', 'value': 'Decision Tree'}
+                ],
+                placeholder="Escolha um tópico...",
+                style={'color': '#000'},
+                className="mb-4"
+            ),
+            html.Div(id="conteudo-prescritiva", className="text-left", style={
+                'color': '#ddd', 
+                'backgroundColor': '#2a2a2a', 
+                'padding': '20px', 
+                'borderRadius': '8px',
+                "minHeight": "200px"
+            })
+            # --- FIM DA NOVA SEÇÃO ---
+
         ])
     ])
 ], fluid=True, style={"backgroundColor": "#1E1E1E", "paddingBottom": "40px"})
@@ -448,7 +624,7 @@ def atualizar_grafico(tipo_regressao, metodo_opt):
                         p_sample[0] = p_sample[0] * np.random.normal(1, 0.05)
                         p_sample[1] = p_sample[1] + np.random.normal(0, 0.002)  # Ruído ADITIVO
                         p_sample[2] = p_sample[2] * np.random.normal(1, 0.05)
-                        y_sample = exponencial(x, *params_sample)
+                        y_sample = exponencial(x, *p_sample) # Correção: deveria ser p_sample
                         all_y1.append(y_sample)
                         fig.add_trace(go.Scatter(x=x, y=y_sample, mode='lines',
                                                  line=dict(color='#00BFFF', width=0.5),
@@ -525,7 +701,7 @@ def atualizar_grafico(tipo_regressao, metodo_opt):
     fig.add_trace(go.Scatter(x=x, y=y1, mode='lines', name='Ajuste 2024',
                              line=dict(color='#00BFFF', width=2.5),
                              hovertemplate='Hora: %{x}<br>Ajuste: %{y:.2f}°C'))
-    fig.add_trace(go.Scatter(x=x, y=y2, mode='lines', name='Ajuste 2025',
+    fig.add_trace(go.Scatter(x=x, y=y2, mode='lines', name='Ajuste 2G025',
                              line=dict(color='#FF6347', width=2.5),
                              hovertemplate='Hora: %{x}<br>Ajuste: %{y:.2f}°C'))
 
@@ -559,9 +735,9 @@ def atualizar_grafico(tipo_regressao, metodo_opt):
     Output("imagem-teoria", "children"),
     Input("dropdown-teorias", "value")
 )
-def mostrar_imagem(teoria):
+def mostrar_imagem_teoria(teoria):
     if teoria is None:
-        return html.P("Selecione uma teoria para visualizar.", style={"color": "#bbb", "fontSize": "18px"})
+        return html.P("Selecione uma teoria para visualizar.", style={"color": "#bbb", "fontSize": "18px", "paddingTop": "20px"})
     caminho = imagens_teorias.get(teoria)
     if caminho is None:
         # Tenta carregar mesmo assim, caso o 'assets/' seja adicionado pelo Dash
@@ -574,13 +750,29 @@ def mostrar_imagem(teoria):
     elif teoria == "Qui-quadrado":
         caminho = "assets/qui-quadrado.png"
 
-    return html.Img(src=app.get_asset_url(caminho.replace("assets/", "")), style={
+    # Garante que a imagem seja carregada da pasta 'assets'
+    asset_url = app.get_asset_url(caminho.replace("assets/", ""))
+    
+    return html.Img(src=asset_url, style={
         "maxWidth": "70%",  # Use maxWidth para responsividade
         "height": "auto",
         "borderRadius": "12px",
         "boxShadow": "0 0 15px rgba(255,255,200,0.2)",  # Sombra com cor atualizada
         "marginTop": "20px"
     })
+
+# (NOVO) Callback para a seção prescritiva
+@app.callback(
+    Output("conteudo-prescritiva", "children"),
+    Input("dropdown-prescritiva", "value")
+)
+def mostrar_conteudo_prescritivo(topico):
+    if topico is None:
+        return html.P("Selecione um tópico para ver a descrição.", style={"color": "#bbb"})
+    
+    # Pega o texto do dicionário e o formata com Markdown
+    texto = textos_prescritiva.get(topico, "Conteúdo não encontrado.")
+    return dcc.Markdown(texto)
 
 
 # ============================
