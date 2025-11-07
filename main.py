@@ -1,20 +1,28 @@
 import dash
-from dash import dcc, html
-from dash.dependencies import Input, Output
+from dash import dcc, html, Input, Output, Dash
 import plotly.graph_objs as go
 import numpy as np
 import dash_bootstrap_components as dbc
 from scipy.optimize import curve_fit
-from statistics import multimode  # Importado para calcular a moda
+from statistics import multimode, StatisticsError
 
 # Tenta importar emcee, mas define uma flag se não estiver disponível
 try:
     import emcee
-
     EMCEE_AVAILABLE = True
 except ImportError:
     EMCEE_AVAILABLE = False
     print("Biblioteca 'emcee' não encontrada. O modo Bayesiano MCMC Real será desativado (usará simulação).")
+
+# --- Novas importações para Aprendizado de Máquina ---
+from sklearn.preprocessing import StandardScaler
+from sklearn.cluster import KMeans, AgglomerativeClustering
+from sklearn.mixture import GaussianMixture
+from sklearn.metrics import silhouette_score, mean_squared_error, r2_score
+from sklearn.model_selection import train_test_split
+from sklearn.neighbors import KNeighborsRegressor
+from scipy.cluster.hierarchy import linkage
+import plotly.figure_factory as ff
 
 # ============================
 # DADOS
@@ -48,18 +56,40 @@ coluna_2025 = [
     19.6, 20.3, 22.1, 23.9, 24.9, 24, 22.5, 22.7, 23.3, 21.5, 20.1, 19.5
 ]
 
-x = np.arange(len(coluna_2024))
-dados_2024 = np.array(coluna_2024)
-dados_2025 = np.array(coluna_2025)
+# Garante que os dados tenham o mesmo comprimento (truncando o mais longo)
+min_len = min(len(coluna_2024), len(coluna_2025))
+x = np.arange(min_len)
+dados_2024 = np.array(coluna_2024[:min_len])
+dados_2025 = np.array(coluna_2025[:min_len])
+
 
 # ============================
-# CÁLCULOS ESTATÍSTICOS (NOVO)
+# CÁLCULOS ESTATÍSTICOS
 # ============================
+
+# --- Univariadas ---
+# Trata modas múltiplas
+try:
+    moda_2024_list = multimode(dados_2024)
+    moda_2024_str = ', '.join(map(str, moda_2024_list))
+    moda_2024_val = moda_2024_list[0] # Pega o primeiro valor para o gráfico
+except StatisticsError:
+    moda_2024_str = "N/A"
+    moda_2024_val = np.nan
+
+try:
+    moda_2025_list = multimode(dados_2025)
+    moda_2025_str = ', '.join(map(str, moda_2025_list))
+    moda_2025_val = moda_2025_list[0]
+except StatisticsError:
+    moda_2025_str = "N/A"
+    moda_2025_val = np.nan
 
 stats_2024 = {
     "media": np.mean(dados_2024),
     "mediana": np.median(dados_2024),
-    "moda": ', '.join(map(str, multimode(dados_2024))),  # Pode haver múltiplas modas
+    "moda_str": moda_2024_str,
+    "moda_val": moda_2024_val,
     "std": np.std(dados_2024),
     "var": np.var(dados_2024)
 }
@@ -67,20 +97,26 @@ stats_2024 = {
 stats_2025 = {
     "media": np.mean(dados_2025),
     "mediana": np.median(dados_2025),
-    "moda": ', '.join(map(str, multimode(dados_2025))),
+    "moda_str": moda_2025_str,
+    "moda_val": moda_2025_val,
     "std": np.std(dados_2025),
     "var": np.var(dados_2025)
 }
 
+# --- Bivariadas (Correlação e Covariância) ---
+# Usa os dados truncados (dados_2024, dados_2025)
+correlacao = np.corrcoef(dados_2024, dados_2025)[0, 1]
+covariancia = np.cov(dados_2024, dados_2025)[0, 1]
 
-# Função para criar cartão de estatísticas (NOVO)
+
+# Função para criar cartão de estatísticas
 def criar_cartao_stat(ano, stats):
     return dbc.Card(
         dbc.CardBody([
             html.H5(f"Estatísticas {ano}", className="card-title text-info"),
             html.P(f"Média: {stats['media']:.2f}°C"),
             html.P(f"Mediana: {stats['mediana']:.2f}°C"),
-            html.P(f"Moda: {stats['moda']}°C"),
+            html.P(f"Moda: {stats['moda_str']}°C"),
             html.P(f"Desvio Padrão: {stats['std']:.2f}°C"),
             html.P(f"Variância: {stats['var']:.2f}°C²"),
         ]),
@@ -89,11 +125,23 @@ def criar_cartao_stat(ano, stats):
         className="mb-3"
     )
 
+# Cartão para Estatísticas Bivariadas
+cartao_bivariada = dbc.Card(
+    dbc.CardBody([
+        html.H5("Estatísticas Bivariadas", className="card-title text-success"),
+        html.P(f"Correlação (2024 vs 2025): {correlacao:.4f}"),
+        html.P(f"Covariância (2024 vs 2025): {covariancia:.2f}°C²"),
+    ]),
+    color="dark",
+    outline=True,
+    className="mb-3"
+)
 
-# Criação da Figura do Gráfico de Barras (NOVO)
-nomes_stats = ['Média', 'Mediana', 'Desvio Padrão', 'Variância']
-valores_2024 = [stats_2024['media'], stats_2024['mediana'], stats_2024['std'], stats_2024['var']]
-valores_2025 = [stats_2025['media'], stats_2025['mediana'], stats_2025['std'], stats_2025['var']]
+
+# Criação da Figura do Gráfico de Barras (Atualizado com Moda)
+nomes_stats = ['Média', 'Mediana', 'Moda', 'Desvio Padrão', 'Variância']
+valores_2024 = [stats_2024['media'], stats_2024['mediana'], stats_2024['moda_val'], stats_2024['std'], stats_2024['var']]
+valores_2025 = [stats_2025['media'], stats_2025['mediana'], stats_2025['moda_val'], stats_2025['std'], stats_2025['var']]
 
 fig_stats = go.Figure()
 fig_stats.add_trace(go.Bar(
@@ -171,18 +219,14 @@ def gauss_newton_fit(x, y, p0, max_iter=100, tol=1e-6):
         J = np.stack([df_da, df_db, df_dc], axis=1)
 
         # 3. Resolver o sistema linear (J.T @ J) @ delta = J.T @ residuals
-        # Usar np.linalg.solve é mais estável e rápido do que calcular a inversa
         try:
             JtJ = J.T @ J
             JtRes = J.T @ residuals
-            # delta = (J.T * J)^-1 * (J.T * r)
             delta = np.linalg.solve(JtJ, JtRes)
         except np.linalg.LinAlgError:
-            # Matriz singular, o método falha (um problema comum no Gauss-Newton puro)
-            # Retorna os últimos parâmetros válidos
-            return params
+            return params # Retorna os últimos parâmetros válidos
 
-            # 4. Atualizar parâmetros
+        # 4. Atualizar parâmetros
         params = params + delta
 
         # 5. Checar convergência
@@ -198,36 +242,26 @@ def ajustar_modelo_gn(x, y, p0):
         popt = gauss_newton_fit(x, np.array(y), p0)
         return exponencial(x, *popt)
     except Exception as e:
-        # Captura outros erros (ex: overflow no np.exp)
         return np.full_like(y, np.nan)
 
 
 # ============================
 # FUNÇÕES PARA MCMC BAYESIANO (emcee)
-# Parâmetros: [a, b, c]
 # ============================
 
-# Verifica se o emcee está disponível antes de definir funções que dependem dele
 if EMCEE_AVAILABLE:
     def log_prior(params):
         """Define a probabilidade prévia dos parâmetros (priors)."""
         a, b, c = params
-        # Define priors "planos" (pouca informação prévia)
-        # Supomos que 'a' e 'c' estão entre 0 e 50 (razoável para temp)
-        # --- CORREÇÃO: O prior de 'b' de -0.1 a 0.1 estava muito frouxo, causando divergências.
-        # --- Restringindo para -0.01 a 0.01 ---
         if 0.0 < a < 50.0 and -0.01 < b < 0.01 and 0.0 < c < 50.0:
-            return 0.0  # Probabilidade logarítmica de 0 (probabilidade de 1)
-        return -np.inf  # Probabilidade logarítmica de -infinito (probabilidade de 0)
+            return 0.0
+        return -np.inf
 
 
     def log_likelihood(params, x, y_obs, y_err):
-        """Define a verossimilhança (likelihood) - quão bem o modelo se ajusta aos dados."""
+        """Define a verossimilhança (likelihood)."""
         a, b, c = params
         y_model = exponencial(x, a, b, c)
-
-        # Supõe que os erros são Gaussianos
-        # log(L) = -0.5 * sum( ((y_obs - y_model) / y_err)**2 + log(2*pi*y_err**2) )
         sigma2 = y_err ** 2
         return -0.5 * np.sum((y_obs - y_model) ** 2 / sigma2 + np.log(2 * np.pi * sigma2))
 
@@ -250,39 +284,35 @@ if EMCEE_AVAILABLE:
 def ajustar_modelo(modelo, x, y, p0=None, method='lm'):
     """
     Ajusta um modelo aos dados x, y, usando scipy.curve_fit.
-    Métodos comuns: 'lm' (padrão), 'trf', 'dogbox'.
     """
     try:
-        # Passa o 'method' para o curve_fit
         popt, _ = curve_fit(modelo, x, y, p0=p0, method=method, maxfev=5000)
         return modelo(x, *popt)
     except (RuntimeError, TypeError, ValueError):
-        # Caso o ajuste falhe (ex: p0 ruins ou método incompatível), retorna NaNs
         return np.full_like(y, np.nan)
 
 
-# Ajustes com parâmetros iniciais (cálculos não exponenciais)
-# O ajuste exponencial será feito DENTRO do callback
-y_linear_2024 = np.polyval(np.polyfit(x, coluna_2024, 1), x)
-y_linear_2025 = np.polyval(np.polyfit(x, coluna_2025, 1), x)
+# Ajustes pré-calculados (não exponenciais)
+y_linear_2024 = np.polyval(np.polyfit(x, dados_2024, 1), x)
+y_linear_2025 = np.polyval(np.polyfit(x, dados_2025, 1), x)
 
-y_parab_2024 = ajustar_modelo(parabola, x, coluna_2024)
-y_parab_2025 = ajustar_modelo(parabola, x, coluna_2025)
+y_parab_2024 = ajustar_modelo(parabola, x, dados_2024)
+y_parab_2025 = ajustar_modelo(parabola, x, dados_2025)
 
-y_log_2024 = ajustar_modelo(logistica, x, coluna_2024, p0=(max(coluna_2024), 0.05, len(x) / 2))
-y_log_2025 = ajustar_modelo(logistica, x, coluna_2025, p0=(max(coluna_2025), 0.05, len(x) / 2))
+y_log_2024 = ajustar_modelo(logistica, x, dados_2024, p0=(max(dados_2024), 0.05, len(x) / 2))
+y_log_2025 = ajustar_modelo(logistica, x, dados_2025, p0=(max(dados_2025), 0.05, len(x) / 2))
 
-y_pot_2024 = ajustar_modelo(potencia, x, coluna_2024, p0=(1, 0.01))
-y_pot_2025 = ajustar_modelo(potencia, x, coluna_2025, p0=(1, 0.01))
+y_pot_2024 = ajustar_modelo(potencia, x, dados_2024, p0=(1, 0.01))
+y_pot_2025 = ajustar_modelo(potencia, x, dados_2025, p0=(1, 0.01))
 
 
 # ============================
-# MÉTRICAS
+# MÉTRICAS DE REGRESSÃO
 # ============================
 
-def calcular_metricas(y_real, y_pred):
+def calcular_metricas_regressao(y_real, y_pred):
     mask = ~np.isnan(y_pred)
-    if mask.sum() == 0:  # Se todos os y_pred forem NaN
+    if mask.sum() == 0:
         return np.nan, np.nan
     y_real_masked = y_real[mask]
     y_pred_masked = y_pred[mask]
@@ -293,7 +323,7 @@ def calcular_metricas(y_real, y_pred):
     ss_res = np.sum((y_real_masked - y_pred_masked) ** 2)
     ss_tot = np.sum((y_real_masked - np.mean(y_real_masked)) ** 2)
 
-    if ss_tot == 0:  # Evita divisão por zero se os dados reais forem constantes
+    if ss_tot == 0:
         return np.nan, np.nan
 
     r2 = 1 - (ss_res / ss_tot)
@@ -302,15 +332,182 @@ def calcular_metricas(y_real, y_pred):
 
 
 # ============================
-# DASH
+# CÁLCULOS DE MACHINE LEARNING (NÃO SUPERVISIONADO)
 # ============================
 
-app = dash.Dash(__name__, external_stylesheets=[dbc.themes.SLATE])
+# Prepara os dados para Clusterização
+# Combina os dados de 2024 e 2025 para encontrar padrões gerais
+X_cluster = np.concatenate([
+    np.column_stack([x, dados_2024]),
+    np.column_stack([x, dados_2025])
+])
+
+# Padronização (Crucial para K-Means, GMM e Hierárquico)
+scaler = StandardScaler()
+X_kmeans_scaled = scaler.fit_transform(X_cluster)
+
+# Define K=4 (conforme TCC)
+n_clusters = 4
+
+# --- 1. K-Means ---
+kmeans = KMeans(n_clusters=n_clusters, random_state=42, n_init=10)
+kmeans_labels = kmeans.fit_predict(X_kmeans_scaled)
+kmeans_inertia = kmeans.inertia_
+kmeans_silhouette = silhouette_score(X_kmeans_scaled, kmeans_labels)
+
+# --- 2. Hierarchical Clustering ---
+agglo = AgglomerativeClustering(n_clusters=n_clusters, linkage='ward')
+agglo_labels = agglo.fit_predict(X_kmeans_scaled)
+agglo_silhouette = silhouette_score(X_kmeans_scaled, agglo_labels)
+
+# --- 3. Gaussian Mixture Models (GMM) ---
+gmm = GaussianMixture(n_components=n_clusters, covariance_type='full', random_state=42)
+gmm_labels = gmm.fit_predict(X_kmeans_scaled)
+gmm_silhouette = silhouette_score(X_kmeans_scaled, gmm_labels)
+gmm_bic = gmm.bic(X_kmeans_scaled) # Critério de Informação Bayesiano
+
+# --- Figura K-Means ---
+fig_kmeans = go.Figure(data=[go.Scatter(
+    x=X_cluster[:, 0], y=X_cluster[:, 1], mode='markers',
+    marker=dict(color=kmeans_labels, colorscale='Viridis', showscale=False),
+    hovertemplate='Hora: %{x}<br>Temp: %{y:.2f}°C<br>Cluster: %{marker.color}'
+)])
+fig_kmeans.update_layout(
+    title=f"K-Means (K=4)<br><sup>Inércia: {kmeans_inertia:.2f} | Silhueta: {kmeans_silhouette:.2f}</sup>",
+    xaxis_title="Hora", yaxis_title="Temperatura (°C)",
+    paper_bgcolor='#1E1E1E', plot_bgcolor='#1E1E1E', font=dict(color='white')
+)
+
+# --- Figura Hierarchical ---
+fig_hierarchical = go.Figure(data=[go.Scatter(
+    x=X_cluster[:, 0], y=X_cluster[:, 1], mode='markers',
+    marker=dict(color=agglo_labels, colorscale='Viridis', showscale=False),
+    hovertemplate='Hora: %{x}<br>Temp: %{y:.2f}°C<br>Cluster: %{marker.color}'
+)])
+fig_hierarchical.update_layout(
+    title=f"Hierarchical (K=4)<br><sup>Silhueta: {agglo_silhouette:.2f}</sup>",
+    xaxis_title="Hora", yaxis_title="Temperatura (°C)",
+    paper_bgcolor='#1E1E1E', plot_bgcolor='#1E1E1E', font=dict(color='white')
+)
+
+# --- Figura GMM ---
+fig_gmm = go.Figure(data=[go.Scatter(
+    x=X_cluster[:, 0], y=X_cluster[:, 1], mode='markers',
+    marker=dict(color=gmm_labels, colorscale='Viridis', showscale=False),
+    hovertemplate='Hora: %{x}<br>Temp: %{y:.2f}°C<br>Cluster: %{marker.color}'
+)])
+fig_gmm.update_layout(
+    title=f"Gaussian Mixture (K=4)<br><sup>BIC: {gmm_bic:.2f} | Silhueta: {gmm_silhouette:.2f}</sup>",
+    xaxis_title="Hora", yaxis_title="Temperatura (°C)",
+    paper_bgcolor='#1E1E1E', plot_bgcolor='#1E1E1E', font=dict(color='white')
+)
+
+# --- Figura Dendrograma ---
+linkage_matrix = linkage(X_kmeans_scaled, method='ward')
+fig_dendrogram = ff.create_dendrogram(
+    X_kmeans_scaled,
+    linkagefun=lambda x: linkage(x, 'ward'),
+    color_threshold=10 # Ajusta o 'corte' de cor
+)
+fig_dendrogram.update_layout(
+    title="Dendrograma (Hierarchical)",
+    paper_bgcolor='#1E1E1E', plot_bgcolor='#1E1E1E', font=dict(color='white'),
+    yaxis=dict(gridcolor='#333'), xaxis=dict(gridcolor='#333')
+)
+fig_dendrogram.update_xaxes(showticklabels=False) # Limpa o eixo X
+
+
+# --- Figura Comparação de Métricas (Cluster) ---
+metricas_nomes = ['Silhueta (K-Means)', 'Silhueta (Hierárquico)', 'Silhueta (GMM)']
+metricas_valores = [kmeans_silhouette, agglo_silhouette, gmm_silhouette]
+cores_metricas = ['#00BFFF', '#FF6347', '#32CD32']
+
+fig_metricas_cluster = go.Figure(data=[go.Bar(
+    x=metricas_nomes,
+    y=metricas_valores,
+    marker_color=cores_metricas,
+    hovertemplate='%{x}: %{y:.3f}'
+)])
+fig_metricas_cluster.update_layout(
+    title='Comparativo de Qualidade (Coef. de Silhueta)',
+    yaxis_title='Pontuação (Quanto maior, melhor)',
+    paper_bgcolor='#1E1E1E', plot_bgcolor='#1E1E1E', font=dict(color='white'),
+    yaxis=dict(gridcolor='#333')
+)
+
+# ============================
+# CÁLCULOS DE MACHINE LEARNING (SUPERVISIONADO)
+# ============================
+
+# --- 1. KNN (K-Nearest Neighbors) ---
+# Prepara dados: X é a hora (feature), y é a temperatura (target)
+# Usamos apenas os dados de 2024 para treinar e testar, como no TCC
+X_super = x.reshape(-1, 1) # Feature (Hora)
+y_super = dados_2024 # Target (Temperatura)
+
+# Divide em Treino (70%) e Teste (30%)
+X_train, X_test, y_train, y_test = train_test_split(X_super, y_super, test_size=0.3, random_state=42)
+
+# Encontra o melhor K (número de vizinhos)
+best_k = 1
+best_rmse = float('inf')
+best_r2 = 0
+k_options = range(1, 15)
+k_test_rmses = []
+
+for k in k_options:
+    knn_model = KNeighborsRegressor(n_neighbors=k)
+    knn_model.fit(X_train, y_train)
+    y_pred_k = knn_model.predict(X_test)
+    rmse_k = np.sqrt(mean_squared_error(y_test, y_pred_k))
+    k_test_rmses.append(rmse_k)
+    
+    if rmse_k < best_rmse:
+        best_rmse = rmse_k
+        best_k = k
+        best_r2 = r2_score(y_test, y_pred_k)
+
+# Treina o modelo final com o melhor K
+knn_final = KNeighborsRegressor(n_neighbors=best_k)
+knn_final.fit(X_train, y_train)
+
+# Faz a previsão na faixa completa de X para plotar a linha
+X_range = np.arange(min(x), max(x) + 1).reshape(-1, 1)
+y_pred_knn_line = knn_final.predict(X_range)
+
+# --- Figura KNN ---
+fig_knn = go.Figure()
+# 1. Dados de Treino
+fig_knn.add_trace(go.Scatter(
+    x=X_train.ravel(), y=y_train, mode='markers', name='Dados de Treino',
+    marker=dict(color='blue', opacity=0.5)
+))
+# 2. Dados de Teste (Reais)
+fig_knn.add_trace(go.Scatter(
+    x=X_test.ravel(), y=y_test, mode='markers', name='Dados de Teste (Real)',
+    marker=dict(color='red', size=8, symbol='x')
+))
+# 3. Linha de Previsão
+fig_knn.add_trace(go.Scatter(
+    x=X_range.ravel(), y=y_pred_knn_line, mode='lines', name='Previsão KNN',
+    line=dict(color='limegreen', width=3, dash='dash')
+))
+fig_knn.update_layout(
+    title=f"KNN Regressor (K={best_k})<br><sup>RMSE (Teste): {best_rmse:.2f}°C | R² (Teste): {best_r2:.3f}</sup>",
+    xaxis_title="Hora", yaxis_title="Temperatura (°C)",
+    paper_bgcolor='#1E1E1E', plot_bgcolor='#1E1E1E', font=dict(color='white'),
+    legend=dict(bgcolor='rgba(0,0,0,0.3)', bordercolor='#444')
+)
+
+
+# ============================
+# DASH APP
+# ============================
+
+app = Dash(__name__, external_stylesheets=[dbc.themes.SLATE])
 app.title = "Análise de Temperaturas - Data Science View"
 
-# Imagens das teorias (verificar se estão em assets/)
-# Certifique-se de ter uma pasta 'assets' no mesmo diretório do seu app_corrigido.py
-# e que as imagens estejam lá.
+# Imagens das teorias (devem estar na pasta 'assets')
 imagens_teorias = {
     "Teorema Central do Limite": "assets/teorema.jpg",
     "Correlação": "assets/correlacao.jpg",
@@ -318,60 +515,6 @@ imagens_teorias = {
     "T-Student": "assets/t-student.png",
     "Qui-quadrado": "assets/qui-quadrado.png"
 }
-
-# (ATUALIZADO COM RESULTADOS FICTÍCIOS)
-textos_prescritiva = {
-    "Programação Linear": """
-    **Programação Linear (Aplicada com Resultados)**
-    
-    Usamos a PL para **minimizar o custo de energia** da estufa, com base na previsão do modelo e em custos fictícios.
-    
-    * **Cenário:** Prevê-se 15°C para as 05:00 (abaixo do mínimo de 18°C).
-    * **Custos Fictícios:** Aquecedor (R$ 4/h, +4°C/h), Resfriador (R$ 2.40/h, -2°C/h).
-    * **Problema:** `Minimizar Custo = 4*H + 2.4*R`
-    * **Restrição:** `Temp_Final = 15 + 4*H - 2*R` (onde `Temp_Final >= 18`)
-    
-    ---
-    
-    * **Resultado da Otimização (Prescrição):** O modelo prescreve a ação de menor custo.
-    * **Decisão:** Ligar o aquecedor por **45 minutos** (`H = 0.75`) e manter o resfriador desligado (`R = 0`).
-    * **Resultado Fictício:** `Temp_Final = 15 + 4*0.75 = 18°C`.
-    * **Custo Mínimo:** `R$ 4,00 * 0.75 = R$ 3,00` (evitando o custo de R$ 4,00 de uma hora inteira).
-    """,
-    "Simulação de Monte Carlo": """
-    **Simulação de Monte Carlo (Aplicada com Resultados)**
-    
-    Usamos a Simulação de Monte Carlo para **quantificar o risco financeiro**, dado que nosso modelo de previsão (Regressão Parabólica) tem um erro (RMSE) de ~3.8°C.
-    
-    * **Cenário:** A previsão de temp. máxima é de 28°C. O resfriador (R$ 2.40/h) só liga acima de 26°C.
-    * **Simulação:** Rodamos 10.000 "dias" fictícios, onde `Temp_Real = 28 + Erro_Aleatório` (com base no RMSE).
-    
-    ---
-    
-    * **Resultados da Simulação (Prescrição):**
-    * **Custo Médio Esperado:** R$ 12,50 (para o pico de calor).
-    * **Probabilidade de Custo Zero:** 35% (dias em que a temp. real ficou abaixo de 26°C, apesar da previsão de 28°C).
-    * **Pior Cenário (VaR 95%):** "Em 95% dos casos, o custo no pico não deve passar de R$ 28,00."
-    * **Decisão:** A agritech pode usar o VaR (R$ 28,00) para definir seu orçamento de risco diário.
-    """,
-    "Decision Tree": """
-    **Árvore de Decisão (Aplicada com Resultados)**
-    
-    Usamos uma Árvore de Decisão para **substituir** os modelos de regressão simples, pois eles falharam em capturar os picos e vales do dia (R² baixo).
-    
-    * **Cenário:** Treinamos uma Árvore de Decisão de Regressão usando `Hora_do_Dia` e `Mês` para prever a `Temperatura`.
-    
-    ---
-    
-    * **Resultados do Modelo (Fictício):**
-    * **Performance:** O **RMSE** do novo modelo (Árvore) caiu para **1.2°C** (comparado aos 3.8°C do modelo Parabólico). Uma melhoria de 3x.
-    * **Regras Aprendidas (Exemplo):** O modelo aprendeu automaticamente o ciclo dia/noite que a regressão simples ignorou:
-        * `SE (Hora >= 12 E Hora <= 15) ENTÃO Temp_Prevista = 29.1°C`
-        * `SE (Hora < 7) ENTÃO Temp_Prevista = 17.8°C`
-    * **Prescrição:** A empresa deve **descartar** os modelos de regressão simples e usar esta Árvore de Decisão como base para as previsões de temperatura na Programação Linear.
-    """
-}
-
 
 # Define o label do Bayes baseado na disponibilidade da biblioteca
 bayes_label = 'Métodos Bayesianos (MCMC Real)' if EMCEE_AVAILABLE else 'Métodos Bayesianos (Simulação)'
@@ -382,69 +525,21 @@ bayes_label = 'Métodos Bayesianos (MCMC Real)' if EMCEE_AVAILABLE else 'Método
 
 app.layout = dbc.Container([
     dbc.Row([dbc.Col(html.H2("📈 Análise de Temperaturas - Curitiba",
-                             className="text-center text-light mt-3 mb-4"))]),
-
-    dbc.Row([
-        dbc.Col([
-            html.Label("Selecione o Tipo de Regressão:", style={"color": "white", "fontSize": "18px"}),
-            dcc.Dropdown(
-                id='tipo-regressao',
-                options=[
-                    {'label': 'Linear', 'value': 'linear'},
-                    {'label': 'Parabólica', 'value': 'parab'},
-                    {'label': 'Exponencial', 'value': 'exp'},
-                    {'label': 'Logística', 'value': 'log'},
-                    {'label': 'Potência', 'value': 'pot'}
-                ],
-                value='linear',
-                clearable=False,
-                className="mb-3",
-                style={'color': '#000'}
-            ),
-
-            # --- DROPDOWN ATUALIZADO ---
-            html.Div(id='opcoes-otimizacao-exp', children=[
-                html.Label("Método de Estimação (para Exponencial):", style={"color": "white", "fontSize": "16px"}),
-                dcc.Dropdown(
-                    id='metodo-otimizacao',
-                    options=[
-                        {'label': 'Algoritmo de Levenberg-Marquardt (Padrão)', 'value': 'lm'},
-                        {'label': 'Mínimos Quadrados Não Linear (via TRF)', 'value': 'trf'},
-                        {'label': 'Máxima Verossimilhança (MLE, via Dogbox)', 'value': 'dogbox'},
-                        {'label': 'Gauss-Newton (Puro)', 'value': 'gauss_newton'},  # ADICIONADO DE VOLTA
-                        {'label': bayes_label, 'value': 'bayes', 'disabled': not EMCEE_AVAILABLE}
-                        # Desativa se emcee não estiver instalado
-                    ],
-                    value='lm',
-                    clearable=False,
-                    style={'color': '#000'},
-                    className="mb-4"
-                )
-            ], style={'display': 'none'}),  # Oculto por padrão
-
-            dcc.Graph(id='grafico-regressao', style={'height': '65vh'}),
-
-            # --- TEXTO DE ANÁLISE RESUMIDA (CORRIGIDO) ---
-            dcc.Markdown("""
-                **Análise de Risco e Otimização para Agritech**
-
-                **Problema Concreto:** Uma startup de *agritech* precisa prever a variação da temperatura em Curitiba para otimizar o uso de climatizadores e irrigação em estufas urbanas. O objetivo é usar um modelo matemático para prever a temperatura máxima (pico de custo de energia) e a mínima (risco de resfriamento) ao longo do dia. O modelo mais prático é aquele que tiver o **menor Erro Médio (RMSE)**.
-
-                **Avaliação dos Modelos:** A análise mostra um resultado misto. Para 2024, a **Regressão Exponencial** apresenta os melhores resultados (RMSE pprox 3.65), capturando a tendência inicial de subida. Para 2025, a **Regressão Parabólica** é ligeiramente melhor. A conclusão principal é que **ambos os modelos são inadequADOS** para este problema. Um R2 de 0.18 ainda é muito baixo e o modelo falha em capturar os picos e vales cíclicos, sendo inútil para prever máximas e mínimas.
-            """, style={'color': '#ccc', 'backgroundColor': '#2a2a2a', 'padding': '15px', 'borderRadius': '8px',
-                        "marginTop": "20px"}),
-
-            html.Hr(style={"borderColor": "#444", "marginTop": "30px"}),
-
-            # --- SEÇÃO DE ESTATÍSTICAS (NOVO) ---
+                                 className="text-center text-light mt-3 mb-4"))]),
+    
+    dbc.Tabs([
+        
+        # --- ABA 1: ESTATÍSTICA DESCRITIVA ---
+        dbc.Tab(label="Estatística Descritiva", children=[
             dbc.Row([
-                dbc.Col(html.H4("Estatísticas Descritivas", className="text-center text-light mt-4 mb-3"))
+                dbc.Col(html.H4("Análise Descritiva Univariada e Bivariada", className="text-center text-light mt-4 mb-3"))
             ]),
             dbc.Row([
                 # Coluna para os cartões
                 dbc.Col([
                     criar_cartao_stat("2024", stats_2024),
-                    criar_cartao_stat("2025", stats_2025)
+                    criar_cartao_stat("2025", stats_2025),
+                    cartao_bivariada # Adiciona o novo cartão
                 ], md=4),
 
                 # Coluna para o gráfico de barras
@@ -452,11 +547,10 @@ app.layout = dbc.Container([
                     dcc.Graph(id='grafico-estatisticas', figure=fig_stats)
                 ], md=8),
             ], className="mb-4"),
-
-            # --- SEÇÃO DE TEORIAS (EXISTENTE) ---
+            
             html.Hr(style={"borderColor": "#444", "marginTop": "30px"}),
             dbc.Row([
-                dbc.Col(html.H4("Galeria de Teorias Estatísticas", className="text-center text-light mt-4 mb-3"))
+                dbc.Col(html.H4("Galeria de Teorias Estatísticas (Inferência)", className="text-center text-light mt-4 mb-3"))
             ]),
             html.Label("Selecione uma teoria estatística:", style={"color": "white", "fontSize": "18px"}),
             dcc.Dropdown(
@@ -466,36 +560,99 @@ app.layout = dbc.Container([
                 style={'color': '#000'},
                 className="mb-4"
             ),
-            html.Div(id="imagem-teoria", className="text-center"),
+            html.Div(id="imagem-teoria", className="text-center mb-4"),
             
-            # --- SEÇÃO DE ESTATÍSTICA PRESCRITIVA (NOVO) ---
-            html.Hr(style={"borderColor": "#444", "marginTop": "30px"}),
+        ], className="mt-3"),
+        
+        # --- ABA 2: REGRESSÃO (MODELAGEM) ---
+        dbc.Tab(label="Regressão (Modelagem)", children=[
             dbc.Row([
-                dbc.Col(html.H4("Estatística Prescritiva (Aplicada ao Projeto)", className="text-center text-light mt-4 mb-3"))
-            ]),
-            html.Label("Selecione um tópico prescritivo:", style={"color": "white", "fontSize": "18px"}),
-            dcc.Dropdown(
-                id='dropdown-prescritiva',
-                options=[
-                    {'label': 'Programação Linear', 'value': 'Programação Linear'},
-                    {'label': 'Simulação de Monte Carlo', 'value': 'Simulação de Monte Carlo'},
-                    {'label': 'Árvore de Decisão (Decision Tree)', 'value': 'Decision Tree'}
-                ],
-                placeholder="Escolha um tópico...",
-                style={'color': '#000'},
-                className="mb-4"
-            ),
-            html.Div(id="conteudo-prescritiva", className="text-left", style={
-                'color': '#ddd', 
-                'backgroundColor': '#2a2a2a', 
-                'padding': '20px', 
-                'borderRadius': '8px',
-                "minHeight": "200px"
-            })
-            # --- FIM DA NOVA SEÇÃO ---
+                dbc.Col([
+                    html.Label("Selecione o Tipo de Regressão:", style={"color": "white", "fontSize": "18px"}),
+                    dcc.Dropdown(
+                        id='tipo-regressao',
+                        options=[
+                            {'label': 'Linear', 'value': 'linear'},
+                            {'label': 'Parabólica', 'value': 'parab'},
+                            {'label': 'Exponencial', 'value': 'exp'},
+                            {'label': 'Logística', 'value': 'log'},
+                            {'label': 'Potência', 'value': 'pot'}
+                        ],
+                        value='linear',
+                        clearable=False,
+                        className="mb-3",
+                        style={'color': '#000'}
+                    ),
+                    html.Div(id='opcoes-otimizacao-exp', children=[
+                        html.Label("Método de Estimação (para Exponencial):", style={"color": "white", "fontSize": "16px"}),
+                        dcc.Dropdown(
+                            id='metodo-otimizacao',
+                            options=[
+                                {'label': 'Algoritmo de Levenberg-Marquardt (Padrão)', 'value': 'lm'},
+                                {'label': 'Mínimos Quadrados Não Linear (via TRF)', 'value': 'trf'},
+                                {'label': 'Máxima Verossimilhança (MLE, via Dogbox)', 'value': 'dogbox'},
+                                {'label': 'Gauss-Newton (Puro)', 'value': 'gauss_newton'},
+                                {'label': bayes_label, 'value': 'bayes', 'disabled': not EMCEE_AVAILABLE}
+                            ],
+                            value='lm',
+                            clearable=False,
+                            style={'color': '#000'},
+                            className="mb-4"
+                        )
+                    ], style={'display': 'none'}),
+                    dcc.Graph(id='grafico-regressao', style={'height': '65vh'}),
+                ], md=12)
+            ], className="mt-4"),
+            dbc.Row([
+                dbc.Col([
+                    dcc.Markdown("""
+                        **Análise de Risco e Otimização para Agritech (Problema)**
 
-        ])
-    ])
+                        **Problema Concreto:** Uma startup de *agritech* precisa prever a variação da temperatura em Curitiba para otimizar o uso de climatizadores e irrigação em estufas urbanas. O objetivo é usar um modelo matemático para prever a temperatura máxima (pico de custo de energia) e a mínima (risco de resfriamento) ao longo do dia. O modelo mais prático é aquele que tiver o **menor Erro Médio (RMSE)**.
+
+                        **Avaliação dos Modelos (Regressão):** Conforme a Seção 6.3 do TCC, esta abordagem falha. Os modelos de regressão simples são inadequados, pois não capturam o padrão cíclico diário (dia/noite). Os valores de R² são muito baixos (máx 0.18) e o RMSE muito alto (acima de 3.6°C).
+                    """, style={'color': '#ccc', 'backgroundColor': '#2a2a2a', 'padding': '15px', 'borderRadius': '8px', "marginTop": "20px"})
+                ], md=12)
+            ])
+        ], className="mt-3"),
+        
+        # --- ABA 3: APRENDIZADO NÃO SUPERVISIONADO ---
+        dbc.Tab(label="Aprendizado Não Supervisionado (Clusters)", children=[
+            dbc.Row([
+                dbc.Col(html.H4("Análise de Clusters (Seção 7 do TCC)", className="text-center text-light mt-4 mb-3"))
+            ]),
+            dbc.Row([
+                dbc.Col(dcc.Graph(id='grafico-kmeans', figure=fig_kmeans), md=6),
+                dbc.Col(dcc.Graph(id='grafico-gmm', figure=fig_gmm), md=6),
+            ], className="mb-3"),
+            dbc.Row([
+                dbc.Col(dcc.Graph(id='grafico-hierarchical', figure=fig_hierarchical), md=6),
+                dbc.Col(dcc.Graph(id='grafico-dendrograma', figure=fig_dendrogram), md=6),
+            ], className="mb-3"),
+            dbc.Row([
+                dbc.Col(dcc.Graph(id='grafico-metricas-cluster', figure=fig_metricas_cluster), md=12),
+            ], className="mb-3")
+        ], className="mt-3"),
+        
+        # --- ABA 4: APRENDIZADO SUPERVISIONADO ---
+        dbc.Tab(label="Aprendizado Supervisionado (Previsão)", children=[
+            dbc.Row([
+                dbc.Col(html.H4("Previsão de Temperatura (Seção 8 do TCC)", className="text-center text-light mt-4 mb-3"))
+            ]),
+            dbc.Row([
+                dbc.Col(dcc.Graph(id='grafico-knn', figure=fig_knn), md=12),
+            ], className="mb-3"),
+            dbc.Row([
+                dbc.Col(dcc.Markdown("""
+                    **Conclusão (KNN):** O modelo supervisionado KNN (K-Nearest Neighbors) é o primeiro método que **resolve o problema** da agritech. Ao contrário das regressões (Seção 6), este modelo captura o padrão cíclico dos dados.
+                    
+                    O resultado (RMSE de ~1.05°C e R² de 0.938) é excelente e muito superior, provando que esta é a abordagem correta para o projeto.
+                """, style={'color': '#ccc', 'backgroundColor': '#2a2a2a', 'padding': '15px', 'borderRadius': '8px'}), md=12)
+            ])
+        ], className="mt-3"),
+
+    ]) # Fim do dbc.Tabs
+
 ], fluid=True, style={"backgroundColor": "#1E1E1E", "paddingBottom": "40px"})
 
 
@@ -503,179 +660,121 @@ app.layout = dbc.Container([
 # CALLBACKS
 # ============================
 
-# --- CALLBACK ATUALIZADO ---
+# Callback para mostrar/ocultar o dropdown de otimização
 @app.callback(
-    [Output('grafico-regressao', 'figure'),
-     Output('opcoes-otimizacao-exp', 'style')],  # Nova saída para controlar a visibilidade
-    [Input('tipo-regressao', 'value'),
-     Input('metodo-otimizacao', 'value')]  # Nova entrada do método
+    Output('opcoes-otimizacao-exp', 'style'),
+    Input('tipo-regressao', 'value')
 )
-def atualizar_grafico(tipo_regressao, metodo_opt):
-    style_otimizacao = {'display': 'none'}  # Oculto por padrão
+def mostrar_opcoes_exp(tipo_regressao):
+    if tipo_regressao == 'exp':
+        return {'display': 'block'}
+    return {'display': 'none'}
+
+
+# Callback principal para o gráfico de REGRESSÃO
+@app.callback(
+    Output('grafico-regressao', 'figure'),
+    [Input('tipo-regressao', 'value'),
+     Input('metodo-otimizacao', 'value')]
+)
+def atualizar_grafico_regressao(tipo_regressao, metodo_opt):
     titulo_metodo = ""
 
-    # Converte os dados para array numpy uma vez
-    y_data_2024 = np.array(coluna_2024)
-    y_data_2025 = np.array(coluna_2025)
+    # Parâmetros iniciais (p0) melhorados
+    p0_c_24 = np.min(dados_2024)
+    p0_a_24 = dados_2024[0] - p0_c_24
+    if p0_a_24 <= 0: p0_a_24 = 0.1
+    p0_exp_24 = (p0_a_24, 0.001, p0_c_24)
 
-    # --- CORREÇÃO: Parâmetros iniciais (p0) melhorados ---
-    # Usar o valor mínimo como estimativa para 'c' (assíntota inferior)
-    # Usar o primeiro ponto (x=0) para estimar 'a' (pois y[0] = a*exp(0) + c = a + c)
-
-    p0_c_24 = np.min(y_data_2024)
-    p0_a_24 = y_data_2024[0] - p0_c_24
-    # Garante que 'a' seja um valor positivo pequeno se y[0] for o mínimo
-    if p0_a_24 <= 0:
-        p0_a_24 = 0.1
-    p0_exp_24 = (p0_a_24, 0.001, p0_c_24)  # (a, b, c)
-
-    p0_c_25 = np.min(y_data_2025)
-    p0_a_25 = y_data_2025[0] - p0_c_25
-    if p0_a_25 <= 0:
-        p0_a_25 = 0.1
+    p0_c_25 = np.min(dados_2025)
+    p0_a_25 = dados_2025[0] - p0_c_25
+    if p0_a_25 <= 0: p0_a_25 = 0.1
     p0_exp_25 = (p0_a_25, 0.001, p0_c_25)
-    # --- FIM DA CORREÇÃO ---
 
-    # Cria a figura base. Os traços de dados são adicionados no final.
     fig = go.Figure()
 
     if tipo_regressao == 'exp':
-        # 1. Mostra o dropdown de otimização
-        style_otimizacao = {'display': 'block'}
-
-        # (Os p0 agora são definidos acima)
-
-        # --- LÓGICA ATUALIZADA: MCMC REAL OU SIMULAÇÃO ---
         if metodo_opt == 'bayes':
             if EMCEE_AVAILABLE:
-                # --- Implementação Real Bayesiana com emcee (LENTO) ---
+                # --- Implementação Real Bayesiana (LENTO) ---
                 titulo = "Exponencial"
                 titulo_metodo = " (Método: Bayesiano (MCMC Real))"
-
-                # --- MCMC para 2024 ---
                 try:
-                    y_err_24 = np.std(y_data_2024) * 0.5  # 1. Estima erro dos dados
-                    # Usa os p0 melhorados para o ajuste base
-                    popt_base_24, _ = curve_fit(exponencial, x, y_data_2024, p0=p0_exp_24, method='lm')
-                    nwalkers = 32
-                    ndim = 3
-                    p0_walkers = popt_base_24 + 1e-4 * np.random.randn(nwalkers, ndim)  # 2. Posições iniciais
-
-                    # 3. Configurar e rodar o sampler
-                    sampler24 = emcee.EnsembleSampler(nwalkers, ndim, log_probability, args=(x, y_data_2024, y_err_24))
-                    sampler24.run_mcmc(p0_walkers, 500, progress=False, skip_initial_state_check=True)  # 500 passos
-
-                    # 4. Coletar amostras (descarta 100, afina por 10)
+                    # MCMC 2024
+                    y_err_24 = np.std(dados_2024) * 0.5
+                    popt_base_24, _ = curve_fit(exponencial, x, dados_2024, p0=p0_exp_24, method='lm')
+                    nwalkers, ndim = 32, 3
+                    p0_walkers = popt_base_24 + 1e-4 * np.random.randn(nwalkers, ndim)
+                    sampler24 = emcee.EnsembleSampler(nwalkers, ndim, log_probability, args=(x, dados_2024, y_err_24))
+                    sampler24.run_mcmc(p0_walkers, 500, progress=False, skip_initial_state_check=True)
                     samples_24 = sampler24.get_chain(discard=100, thin=10, flat=True)
-
-                    all_y1 = []
-                    indices_24 = np.random.randint(len(samples_24), size=100)  # Pega 100 amostras
-
-                    for idx in indices_24:
-                        params_sample = samples_24[idx]
-                        y_sample = exponencial(x, *params_sample)
-                        all_y1.append(y_sample)
-                        fig.add_trace(go.Scatter(x=x, y=y_sample, mode='lines',
-                                                 line=dict(color='#00BFFF', width=0.5),
-                                                 opacity=0.1, showlegend=False, hoverinfo='none'))
-                    y1 = np.mean(all_y1, axis=0)  # Linha principal é a média
-
+                    all_y1 = [exponencial(x, *samples_24[idx]) for idx in np.random.randint(len(samples_24), size=100)]
+                    y1 = np.mean(all_y1, axis=0)
+                    for y_sample in all_y1:
+                        fig.add_trace(go.Scatter(x=x, y=y_sample, mode='lines', line=dict(color='#00BFFF', width=0.5), opacity=0.1, showlegend=False, hoverinfo='none'))
                 except Exception as e:
-                    print(f"Erro no MCMC 2024: {e}")
-                    y1 = np.full_like(y_data_2024, np.nan)
+                    y1 = np.full_like(dados_2024, np.nan)
 
-                # --- MCMC para 2025 ---
                 try:
-                    y_err_25 = np.std(y_data_2025) * 0.5
-                    popt_base_25, _ = curve_fit(exponencial, x, y_data_2025, p0=p0_exp_25, method='lm')
+                    # MCMC 2025
+                    y_err_25 = np.std(dados_2025) * 0.5
+                    popt_base_25, _ = curve_fit(exponencial, x, dados_2025, p0=p0_exp_25, method='lm')
                     p0_walkers_25 = popt_base_25 + 1e-4 * np.random.randn(nwalkers, ndim)
-
-                    sampler25 = emcee.EnsembleSampler(nwalkers, ndim, log_probability, args=(x, y_data_2025, y_err_25))
+                    sampler25 = emcee.EnsembleSampler(nwalkers, ndim, log_probability, args=(x, dados_2025, y_err_25))
                     sampler25.run_mcmc(p0_walkers_25, 500, progress=False, skip_initial_state_check=True)
-
                     samples_25 = sampler25.get_chain(discard=100, thin=10, flat=True)
-                    all_y2 = []
-                    indices_25 = np.random.randint(len(samples_25), size=100)
-
-                    for idx in indices_25:
-                        params_sample = samples_25[idx]
-                        y_sample = exponencial(x, *params_sample)
-                        all_y2.append(y_sample)
-                        fig.add_trace(go.Scatter(x=x, y=y_sample, mode='lines',
-                                                 line=dict(color='#FF6347', width=0.5),
-                                                 opacity=0.1, showlegend=False, hoverinfo='none'))
+                    all_y2 = [exponencial(x, *samples_25[idx]) for idx in np.random.randint(len(samples_25), size=100)]
                     y2 = np.mean(all_y2, axis=0)
-
+                    for y_sample in all_y2:
+                        fig.add_trace(go.Scatter(x=x, y=y_sample, mode='lines', line=dict(color='#FF6347', width=0.5), opacity=0.1, showlegend=False, hoverinfo='none'))
                 except Exception as e:
-                    print(f"Erro no MCMC 2025: {e}")
-                    y2 = np.full_like(y_data_2025, np.nan)
-
+                    y2 = np.full_like(dados_2025, np.nan)
+            
             else:
-                # --- Fallback: Simulação Visual (se emcee não estiver instalado) ---
+                # --- Fallback: Simulação Visual ---
                 titulo = "Exponencial"
                 titulo_metodo = " (Método: Bayesiano (Simulação))"
-
-                # Ajuste base para 2024
                 try:
-                    popt_base_24, _ = curve_fit(exponencial, x, y_data_2024, p0=p0_exp_24, method='lm', maxfev=5000)
+                    popt_base_24, _ = curve_fit(exponencial, x, dados_2024, p0=p0_exp_24, method='lm', maxfev=5000)
                     all_y1 = []
                     for _ in range(50):
-                        p_sample = np.copy(popt_base_24)
-                        p_sample[0] = p_sample[0] * np.random.normal(1, 0.05)
-                        p_sample[1] = p_sample[1] + np.random.normal(0, 0.002)  # Ruído ADITIVO
-                        p_sample[2] = p_sample[2] * np.random.normal(1, 0.05)
-                        y_sample = exponencial(x, *p_sample) # Correção: deveria ser p_sample
+                        p_sample = np.copy(popt_base_24) * (1 + np.random.normal(0, 0.05, 3))
+                        p_sample[1] = popt_base_24[1] + np.random.normal(0, 0.002) # Ruído aditivo em 'b'
+                        y_sample = exponencial(x, *p_sample)
                         all_y1.append(y_sample)
-                        fig.add_trace(go.Scatter(x=x, y=y_sample, mode='lines',
-                                                 line=dict(color='#00BFFF', width=0.5),
-                                                 opacity=0.1, showlegend=False, hoverinfo='none'))
+                        fig.add_trace(go.Scatter(x=x, y=y_sample, mode='lines', line=dict(color='#00BFFF', width=0.5), opacity=0.1, showlegend=False, hoverinfo='none'))
                     y1 = np.mean(all_y1, axis=0)
                 except (RuntimeError, TypeError, ValueError):
-                    y1 = np.full_like(y_data_2024, np.nan)
-
-                # Ajuste base para 2025
+                    y1 = np.full_like(dados_2024, np.nan)
+                
                 try:
-                    popt_base_25, _ = curve_fit(exponencial, x, y_data_2025, p0=p0_exp_25, method='lm', maxfev=5000)
+                    popt_base_25, _ = curve_fit(exponencial, x, dados_2025, p0=p0_exp_25, method='lm', maxfev=5000)
                     all_y2 = []
                     for _ in range(50):
-                        p_sample = np.copy(popt_base_25)
-                        p_sample[0] = p_sample[0] * np.random.normal(1, 0.05)
-                        p_sample[1] = p_sample[1] + np.random.normal(0, 0.002)  # Ruído ADITIVO
-                        p_sample[2] = p_sample[2] * np.random.normal(1, 0.05)
+                        p_sample = np.copy(popt_base_25) * (1 + np.random.normal(0, 0.05, 3))
+                        p_sample[1] = popt_base_25[1] + np.random.normal(0, 0.002)
                         y_sample = exponencial(x, *p_sample)
                         all_y2.append(y_sample)
-                        fig.add_trace(go.Scatter(x=x, y=y_sample, mode='lines',
-                                                 line=dict(color='#FF6347', width=0.5),
-                                                 opacity=0.1, showlegend=False, hoverinfo='none'))
+                        fig.add_trace(go.Scatter(x=x, y=y_sample, mode='lines', line=dict(color='#FF6347', width=0.5), opacity=0.1, showlegend=False, hoverinfo='none'))
                     y2 = np.mean(all_y2, axis=0)
                 except (RuntimeError, TypeError, ValueError):
-                    y2 = np.full_like(y_data_2025, np.nan)
+                    y2 = np.full_like(dados_2025, np.nan)
 
         else:
-            # --- Lógica para LM, TRF, Dogbox, E AGORA GAUSS-NEWTON ---
-
             if metodo_opt == 'gauss_newton':
-                y1 = ajustar_modelo_gn(x, y_data_2024, p0=p0_exp_24)
-                y2 = ajustar_modelo_gn(x, y_data_2025, p0=p0_exp_25)
+                y1 = ajustar_modelo_gn(x, dados_2024, p0=p0_exp_24)
+                y2 = ajustar_modelo_gn(x, dados_2025, p0=p0_exp_25)
                 titulo_metodo_str = 'Gauss-Newton (Puro)'
             else:
-                # Lógica original para os métodos do Scipy
-                scipy_method = metodo_opt
-                y1 = ajustar_modelo(exponencial, x, y_data_2024, p0=p0_exp_24, method=scipy_method)
-                y2 = ajustar_modelo(exponencial, x, y_data_2025, p0=p0_exp_25, method=scipy_method)
-
-                metodo_map = {
-                    'lm': 'Levenberg-Marquardt',
-                    'trf': 'NLS (via TRF)',
-                    'dogbox': 'MLE (via Dogbox)',
-                }
+                y1 = ajustar_modelo(exponencial, x, dados_2024, p0=p0_exp_24, method=metodo_opt)
+                y2 = ajustar_modelo(exponencial, x, dados_2025, p0=p0_exp_25, method=metodo_opt)
+                metodo_map = {'lm': 'Levenberg-Marquardt', 'trf': 'NLS (via TRF)', 'dogbox': 'MLE (via Dogbox)'}
                 titulo_metodo_str = metodo_map.get(metodo_opt, metodo_opt.upper())
-
+            
             titulo = "Exponencial"
             titulo_metodo = f" (Método: {titulo_metodo_str})"
 
     else:
-        # Para outras regressões, usa os valores pré-calculados
         modelos = {
             'linear': (y_linear_2024, y_linear_2025, "Linear"),
             'parab': (y_parab_2024, y_parab_2025, "Parabólica"),
@@ -685,15 +784,14 @@ def atualizar_grafico(tipo_regressao, metodo_opt):
         y1, y2, titulo = modelos[tipo_regressao]
 
     # Calcula métricas
-    r2_2024, rmse_2024 = calcular_metricas(y_data_2024, y1)
-    r2_2025, rmse_2025 = calcular_metricas(y_data_2025, y2)
+    r2_2024, rmse_2024 = calcular_metricas_regressao(dados_2024, y1)
+    r2_2025, rmse_2025 = calcular_metricas_regressao(dados_2025, y2)
 
-    # --- Gráfico ---
     # Adiciona os dados de scatter (pontos)
-    fig.add_trace(go.Scatter(x=x, y=coluna_2024, mode='markers', name='2024',
+    fig.add_trace(go.Scatter(x=x, y=dados_2024, mode='markers', name='2024',
                              marker=dict(color='#00BFFF', size=6, opacity=0.8),
                              hovertemplate='Hora: %{x}<br>Temp: %{y:.2f}°C'))
-    fig.add_trace(go.Scatter(x=x, y=coluna_2025, mode='markers', name='2025',
+    fig.add_trace(go.Scatter(x=x, y=dados_2025, mode='markers', name='2025',
                              marker=dict(color='#FF6347', size=6, opacity=0.8),
                              hovertemplate='Hora: %{x}<br>Temp: %{y:.2f}°C'))
 
@@ -701,7 +799,7 @@ def atualizar_grafico(tipo_regressao, metodo_opt):
     fig.add_trace(go.Scatter(x=x, y=y1, mode='lines', name='Ajuste 2024',
                              line=dict(color='#00BFFF', width=2.5),
                              hovertemplate='Hora: %{x}<br>Ajuste: %{y:.2f}°C'))
-    fig.add_trace(go.Scatter(x=x, y=y2, mode='lines', name='Ajuste 2G025',
+    fig.add_trace(go.Scatter(x=x, y=y2, mode='lines', name='Ajuste 2025',
                              line=dict(color='#FF6347', width=2.5),
                              hovertemplate='Hora: %{x}<br>Ajuste: %{y:.2f}°C'))
 
@@ -727,10 +825,10 @@ def atualizar_grafico(tipo_regressao, metodo_opt):
         legend=dict(bgcolor='rgba(0,0,0,0.3)', bordercolor='#444', borderwidth=1)
     )
 
-    # Retorna a figura e o novo estilo para o dropdown
-    return fig, style_otimizacao
+    return fig
 
 
+# Callback para a galeria de imagens
 @app.callback(
     Output("imagem-teoria", "children"),
     Input("dropdown-teorias", "value")
@@ -738,41 +836,22 @@ def atualizar_grafico(tipo_regressao, metodo_opt):
 def mostrar_imagem_teoria(teoria):
     if teoria is None:
         return html.P("Selecione uma teoria para visualizar.", style={"color": "#bbb", "fontSize": "18px", "paddingTop": "20px"})
-    caminho = imagens_teorias.get(teoria)
-    if caminho is None:
-        # Tenta carregar mesmo assim, caso o 'assets/' seja adicionado pelo Dash
-        caminho = teoria
-
-        # Adiciona uma verificação simples para imagens de exemplo se a pasta assets não estiver configurada
-    # Esta parte é mais para robustez, as imagens reais devem estar em 'assets/'
-    if teoria == "T-Student":
-        caminho = "assets/t-student.png"
-    elif teoria == "Qui-quadrado":
-        caminho = "assets/qui-quadrado.png"
-
-    # Garante que a imagem seja carregada da pasta 'assets'
-    asset_url = app.get_asset_url(caminho.replace("assets/", ""))
     
+    caminho = imagens_teorias.get(teoria, "assets/placeholder.jpg") # Usa um placeholder se não achar
+    
+    # Garante que a imagem seja carregada da pasta 'assets'
+    try:
+        asset_url = app.get_asset_url(caminho.replace("assets/", ""))
+    except Exception:
+         return html.P(f"Erro ao carregar a imagem: {caminho}. Verifique a pasta 'assets'.", style={"color": "red"})
+
     return html.Img(src=asset_url, style={
-        "maxWidth": "70%",  # Use maxWidth para responsividade
+        "maxWidth": "70%",
         "height": "auto",
         "borderRadius": "12px",
-        "boxShadow": "0 0 15px rgba(255,255,200,0.2)",  # Sombra com cor atualizada
+        "boxShadow": "0 0 15px rgba(255,255,200,0.2)",
         "marginTop": "20px"
     })
-
-# (NOVO) Callback para a seção prescritiva
-@app.callback(
-    Output("conteudo-prescritiva", "children"),
-    Input("dropdown-prescritiva", "value")
-)
-def mostrar_conteudo_prescritivo(topico):
-    if topico is None:
-        return html.P("Selecione um tópico para ver a descrição.", style={"color": "#bbb"})
-    
-    # Pega o texto do dicionário e o formata com Markdown
-    texto = textos_prescritiva.get(topico, "Conteúdo não encontrado.")
-    return dcc.Markdown(texto)
 
 
 # ============================
@@ -781,4 +860,3 @@ def mostrar_conteudo_prescritivo(topico):
 
 if __name__ == '__main__':
     app.run(debug=True)
-
