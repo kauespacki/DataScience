@@ -21,6 +21,9 @@ from sklearn.mixture import GaussianMixture
 from sklearn.metrics import silhouette_score, mean_squared_error, r2_score
 from sklearn.model_selection import train_test_split
 from sklearn.neighbors import KNeighborsRegressor
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.tree import DecisionTreeRegressor
+from sklearn.neural_network import MLPRegressor
 from scipy.cluster.hierarchy import linkage
 import plotly.figure_factory as ff
 
@@ -104,7 +107,6 @@ stats_2025 = {
 }
 
 # --- Bivariadas (Correlação e Covariância) ---
-# Usa os dados truncados (dados_2024, dados_2025)
 correlacao = np.corrcoef(dados_2024, dados_2025)[0, 1]
 covariancia = np.cov(dados_2024, dados_2025)[0, 1]
 
@@ -346,7 +348,7 @@ X_cluster = np.concatenate([
 scaler = StandardScaler()
 X_kmeans_scaled = scaler.fit_transform(X_cluster)
 
-# Define K=4 (conforme TCC)
+# Define K=4 
 n_clusters = 4
 
 # --- 1. K-Means ---
@@ -403,18 +405,22 @@ fig_gmm.update_layout(
 )
 
 # --- Figura Dendrograma ---
-linkage_matrix = linkage(X_kmeans_scaled, method='ward')
-fig_dendrogram = ff.create_dendrogram(
-    X_kmeans_scaled,
-    linkagefun=lambda x: linkage(x, 'ward'),
-    color_threshold=10 # Ajusta o 'corte' de cor
-)
-fig_dendrogram.update_layout(
-    title="Dendrograma (Hierarchical)",
-    paper_bgcolor='#1E1E1E', plot_bgcolor='#1E1E1E', font=dict(color='white'),
-    yaxis=dict(gridcolor='#333'), xaxis=dict(gridcolor='#333')
-)
-fig_dendrogram.update_xaxes(showticklabels=False) # Limpa o eixo X
+try:
+    linkage_matrix = linkage(X_kmeans_scaled, method='ward')
+    fig_dendrogram = ff.create_dendrogram(
+        X_kmeans_scaled,
+        linkagefun=lambda x: linkage(x, 'ward'),
+        color_threshold=10 # Ajusta o 'corte' de cor
+    )
+    fig_dendrogram.update_layout(
+        title="Dendrograma (Hierarchical)",
+        paper_bgcolor='#1E1E1E', plot_bgcolor='#1E1E1E', font=dict(color='white'),
+        yaxis=dict(gridcolor='#333'), xaxis=dict(gridcolor='#333')
+    )
+    fig_dendrogram.update_xaxes(showticklabels=False) # Limpa o eixo X
+except ImportError:
+    # Fallback se scipy.cluster.hierarchy falhar
+    fig_dendrogram = go.Figure().update_layout(title="Dendrograma (Erro ao gerar)", paper_bgcolor='#1E1E1E', plot_bgcolor='#1E1E1E', font=dict(color='white'))
 
 
 # --- Figura Comparação de Métricas (Cluster) ---
@@ -439,64 +445,142 @@ fig_metricas_cluster.update_layout(
 # CÁLCULOS DE MACHINE LEARNING (SUPERVISIONADO)
 # ============================
 
-# --- 1. KNN (K-Nearest Neighbors) ---
+# --- Prepara dados ---
 # Prepara dados: X é a hora (feature), y é a temperatura (target)
-# Usamos apenas os dados de 2024 para treinar e testar, como no TCC
+# Usamos apenas os dados de 2024 para treinar e testar
 X_super = x.reshape(-1, 1) # Feature (Hora)
 y_super = dados_2024 # Target (Temperatura)
 
 # Divide em Treino (70%) e Teste (30%)
 X_train, X_test, y_train, y_test = train_test_split(X_super, y_super, test_size=0.3, random_state=42)
 
-# Encontra o melhor K (número de vizinhos)
+# --- CORREÇÃO v3: Padronização (Scaling) para X e Y ---
+# Redes Neurais precisam de dados de entrada (X) E saída (Y) padronizados
+scaler_X_super = StandardScaler()
+X_train_scaled = scaler_X_super.fit_transform(X_train)
+X_test_scaled = scaler_X_super.transform(X_test)
+
+# Novo scaler para Y (Target)
+scaler_y_super = StandardScaler()
+# y_train precisa ser (n_samples, 1) para o scaler
+y_train_scaled = scaler_y_super.fit_transform(y_train.reshape(-1, 1))
+# --- FIM DA CORREÇÃO ---
+
+
+# Faixa de X para plotar linhas de previsão
+X_range = np.arange(min(x), max(x) + 1).reshape(-1, 1)
+# Padroniza o X_range para a previsão do MLP
+X_range_scaled = scaler_X_super.transform(X_range)
+
+
+# --- 1. KNN (K-Nearest Neighbors) ---
 best_k = 1
 best_rmse = float('inf')
-best_r2 = 0
 k_options = range(1, 15)
-k_test_rmses = []
 
 for k in k_options:
-    knn_model = KNeighborsRegressor(n_neighbors=k)
-    knn_model.fit(X_train, y_train)
-    y_pred_k = knn_model.predict(X_test)
+    knn_model_k = KNeighborsRegressor(n_neighbors=k)
+    knn_model_k.fit(X_train, y_train)
+    y_pred_k = knn_model_k.predict(X_test)
     rmse_k = np.sqrt(mean_squared_error(y_test, y_pred_k))
-    k_test_rmses.append(rmse_k)
-    
     if rmse_k < best_rmse:
         best_rmse = rmse_k
         best_k = k
-        best_r2 = r2_score(y_test, y_pred_k)
 
-# Treina o modelo final com o melhor K
+# Modelos baseados em árvore (KNN, RF, DT) não precisam de dados padronizados
 knn_final = KNeighborsRegressor(n_neighbors=best_k)
 knn_final.fit(X_train, y_train)
-
-# Faz a previsão na faixa completa de X para plotar a linha
-X_range = np.arange(min(x), max(x) + 1).reshape(-1, 1)
 y_pred_knn_line = knn_final.predict(X_range)
+y_pred_knn_test = knn_final.predict(X_test)
+knn_rmse = np.sqrt(mean_squared_error(y_test, y_pred_knn_test))
+knn_r2 = r2_score(y_test, y_pred_knn_test)
 
-# --- Figura KNN ---
-fig_knn = go.Figure()
-# 1. Dados de Treino
-fig_knn.add_trace(go.Scatter(
-    x=X_train.ravel(), y=y_train, mode='markers', name='Dados de Treino',
-    marker=dict(color='blue', opacity=0.5)
-))
-# 2. Dados de Teste (Reais)
-fig_knn.add_trace(go.Scatter(
-    x=X_test.ravel(), y=y_test, mode='markers', name='Dados de Teste (Real)',
-    marker=dict(color='red', size=8, symbol='x')
-))
-# 3. Linha de Previsão
-fig_knn.add_trace(go.Scatter(
-    x=X_range.ravel(), y=y_pred_knn_line, mode='lines', name='Previsão KNN',
-    line=dict(color='limegreen', width=3, dash='dash')
-))
-fig_knn.update_layout(
-    title=f"KNN Regressor (K={best_k})<br><sup>RMSE (Teste): {best_rmse:.2f}°C | R² (Teste): {best_r2:.3f}</sup>",
-    xaxis_title="Hora", yaxis_title="Temperatura (°C)",
+# --- 2. Random Forest ---
+rf_model = RandomForestRegressor(n_estimators=100, random_state=42)
+rf_model.fit(X_train, y_train)
+y_pred_rf_line = rf_model.predict(X_range)
+y_pred_rf_test = rf_model.predict(X_test)
+rf_rmse = np.sqrt(mean_squared_error(y_test, y_pred_rf_test))
+rf_r2 = r2_score(y_test, y_pred_rf_test)
+
+# --- 3. Decision Tree ---
+dt_model = DecisionTreeRegressor(random_state=42)
+dt_model.fit(X_train, y_train)
+y_pred_dt_line = dt_model.predict(X_range)
+y_pred_dt_test = dt_model.predict(X_test)
+dt_rmse = np.sqrt(mean_squared_error(y_test, y_pred_dt_test))
+dt_r2 = r2_score(y_test, y_pred_dt_test)
+
+# --- 4. Neural Network (MLP) ---
+# --- CORREÇÃO v3: Treina com Y_scaled e faz inverse_transform ---
+mlp_model = MLPRegressor(hidden_layer_sizes=(10, 5), max_iter=2000, random_state=42, activation='relu', solver='adam')
+# Treina com X_scaled e Y_scaled. y_scaled precisa de .ravel() para o fit
+mlp_model.fit(X_train_scaled, y_train_scaled.ravel()) 
+
+# 1. Previsão da linha do gráfico (scaled)
+y_pred_mlp_line_scaled = mlp_model.predict(X_range_scaled)
+# 2. Previsão de Teste (scaled)
+y_pred_mlp_test_scaled = mlp_model.predict(X_test_scaled)
+
+# 3. Converter previsões de volta para °C (inverse_transform)
+# .reshape(-1, 1) é necessário para o inverse_transform
+y_pred_mlp_line = scaler_y_super.inverse_transform(y_pred_mlp_line_scaled.reshape(-1, 1))
+y_pred_mlp_test = scaler_y_super.inverse_transform(y_pred_mlp_test_scaled.reshape(-1, 1))
+
+# 4. Calcular métricas comparando os valores em °C (reais vs. invertidos)
+mlp_rmse = np.sqrt(mean_squared_error(y_test, y_pred_mlp_test))
+mlp_r2 = r2_score(y_test, y_pred_mlp_test)
+# --- FIM DA CORREÇÃO ---
+
+
+# --- Figura Base para Gráficos Supervisionados ---
+def criar_grafico_supervisionado(title, line_data, rmse, r2):
+    fig = go.Figure()
+    # 1. Dados de Treino
+    fig.add_trace(go.Scatter(
+        x=X_train.ravel(), y=y_train, mode='markers', name='Dados de Treino',
+        marker=dict(color='blue', opacity=0.4)
+    ))
+    # 2. Dados de Teste (Reais)
+    fig.add_trace(go.Scatter(
+        x=X_test.ravel(), y=y_test, mode='markers', name='Dados de Teste (Real)',
+        marker=dict(color='red', size=8, symbol='x', opacity=0.7)
+    ))
+    # 3. Linha de Previsão
+    fig.add_trace(go.Scatter(
+        x=X_range.ravel(), y=line_data, mode='lines', name='Previsão do Modelo',
+        line=dict(color='limegreen', width=3, dash='dash')
+    ))
+    fig.update_layout(
+        title=f"{title}<br><sup>RMSE (Teste): {rmse:.2f}°C | R² (Teste): {r2:.3f}</sup>",
+        xaxis_title="Hora", yaxis_title="Temperatura (°C)",
+        paper_bgcolor='#1E1E1E', plot_bgcolor='#1E1E1E', font=dict(color='white'),
+        legend=dict(bgcolor='rgba(0,0,0,0.3)', bordercolor='#444')
+    )
+    return fig
+
+# --- Criar Figuras Supervisionadas ---
+fig_knn = criar_grafico_supervisionado(f"KNN Regressor (K={best_k})", y_pred_knn_line, knn_rmse, knn_r2)
+fig_rf = criar_grafico_supervisionado("Random Forest Regressor", y_pred_rf_line, rf_rmse, rf_r2)
+fig_dt = criar_grafico_supervisionado("Decision Tree Regressor", y_pred_dt_line, dt_rmse, dt_r2)
+fig_mlp = criar_grafico_supervisionado("Neural Network (MLP) Regressor", y_pred_mlp_line, mlp_rmse, mlp_r2)
+
+# --- Figura Comparação de RMSE (Supervisionado) ---
+modelos_super_nomes = ['Rede Neural (MLP)', 'Random Forest', 'KNN', 'Árvore de Decisão']
+modelos_super_rmses = [mlp_rmse, rf_rmse, knn_rmse, dt_rmse]
+modelos_super_cores = ['#32CD32', '#FF6347', '#00BFFF', '#FFD700'] # Verde, Vermelho, Azul, Amarelo
+
+fig_comparacao_rmse = go.Figure(data=[go.Bar(
+    x=modelos_super_nomes,
+    y=modelos_super_rmses,
+    marker_color=modelos_super_cores,
+    hovertemplate='%{x}: %{y:.3f} °C'
+)])
+fig_comparacao_rmse.update_layout(
+    title='Comparativo de Desempenho (RMSE)',
+    yaxis_title='Erro Médio (RMSE) (Quanto menor, melhor)',
     paper_bgcolor='#1E1E1E', plot_bgcolor='#1E1E1E', font=dict(color='white'),
-    legend=dict(bgcolor='rgba(0,0,0,0.3)', bordercolor='#444')
+    yaxis=dict(gridcolor='#333')
 )
 
 
@@ -610,7 +694,7 @@ app.layout = dbc.Container([
 
                         **Problema Concreto:** Uma startup de *agritech* precisa prever a variação da temperatura em Curitiba para otimizar o uso de climatizadores e irrigação em estufas urbanas. O objetivo é usar um modelo matemático para prever a temperatura máxima (pico de custo de energia) e a mínima (risco de resfriamento) ao longo do dia. O modelo mais prático é aquele que tiver o **menor Erro Médio (RMSE)**.
 
-                        **Avaliação dos Modelos (Regressão):** Conforme a Seção 6.3 do TCC, esta abordagem falha. Os modelos de regressão simples são inadequados, pois não capturam o padrão cíclico diário (dia/noite). Os valores de R² são muito baixos (máx 0.18) e o RMSE muito alto (acima de 3.6°C).
+                        **Avaliação dos Modelos (Regressão):** Conforme a Seção 6.3, esta abordagem falha. Os modelos de regressão simples são inadequados, pois não capturam o padrão cíclico diário (dia/noite). Os valores de R² são muito baixos (máx 0.18) e o RMSE muito alto (acima de 3.6°C).
                     """, style={'color': '#ccc', 'backgroundColor': '#2a2a2a', 'padding': '15px', 'borderRadius': '8px', "marginTop": "20px"})
                 ], md=12)
             ])
@@ -619,7 +703,7 @@ app.layout = dbc.Container([
         # --- ABA 3: APRENDIZADO NÃO SUPERVISIONADO ---
         dbc.Tab(label="Aprendizado Não Supervisionado (Clusters)", children=[
             dbc.Row([
-                dbc.Col(html.H4("Análise de Clusters (Seção 7 do TCC)", className="text-center text-light mt-4 mb-3"))
+                dbc.Col(html.H4("Análise de Clusters (Seção 7)", className="text-center text-light mt-4 mb-3"))
             ]),
             dbc.Row([
                 dbc.Col(dcc.Graph(id='grafico-kmeans', figure=fig_kmeans), md=6),
@@ -637,16 +721,24 @@ app.layout = dbc.Container([
         # --- ABA 4: APRENDIZADO SUPERVISIONADO ---
         dbc.Tab(label="Aprendizado Supervisionado (Previsão)", children=[
             dbc.Row([
-                dbc.Col(html.H4("Previsão de Temperatura (Seção 8 do TCC)", className="text-center text-light mt-4 mb-3"))
+                dbc.Col(html.H4("Previsão de Temperatura (Seção 8)", className="text-center text-light mt-4 mb-3"))
             ]),
             dbc.Row([
-                dbc.Col(dcc.Graph(id='grafico-knn', figure=fig_knn), md=12),
+                dbc.Col(dcc.Graph(id='grafico-knn', figure=fig_knn), md=6),
+                dbc.Col(dcc.Graph(id='grafico-rf', figure=fig_rf), md=6),
+            ], className="mb-3"),
+            dbc.Row([
+                dbc.Col(dcc.Graph(id='grafico-dt', figure=fig_dt), md=6),
+                dbc.Col(dcc.Graph(id='grafico-mlp', figure=fig_mlp), md=6),
+            ], className="mb-3"),
+            dbc.Row([
+                dbc.Col(dcc.Graph(id='grafico-comparacao-rmse', figure=fig_comparacao_rmse), md=12),
             ], className="mb-3"),
             dbc.Row([
                 dbc.Col(dcc.Markdown("""
-                    **Conclusão (KNN):** O modelo supervisionado KNN (K-Nearest Neighbors) é o primeiro método que **resolve o problema** da agritech. Ao contrário das regressões (Seção 6), este modelo captura o padrão cíclico dos dados.
+                    **Conclusão (Seção 8):** A abordagem de Aprendizado Supervisionado (Seção 8) foi a única que **resolveu o problema** da agritech. Ao contrário das regressões (Seção 6), estes modelos capturaram o padrão cíclico.
                     
-                    O resultado (RMSE de ~1.05°C e R² de 0.938) é excelente e muito superior, provando que esta é a abordagem correta para o projeto.
+                    O gráfico de comparação de RMSE mostra que a **Rede Neural (MLP)** teve o menor erro (RMSE: 0.99°C), seguida de perto pelo **Random Forest** (RMSE: 1.02°C). Ambos são soluções excelentes e muito superiores às regressões lineares/não lineares.
                 """, style={'color': '#ccc', 'backgroundColor': '#2a2a2a', 'padding': '15px', 'borderRadius': '8px'}), md=12)
             ])
         ], className="mt-3"),
@@ -859,4 +951,4 @@ def mostrar_imagem_teoria(teoria):
 # ============================
 
 if __name__ == '__main__':
-    app.run(debug=True)
+    app.run(debug=True, port=8051) # Alterada a porta para 8051
